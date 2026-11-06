@@ -1,0 +1,202 @@
+// Prisma Schema for FMCG Distributor Ordering System (Company A, Jabalpur)
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  RETAILER
+  SALESMAN
+  DESK
+  ADMIN
+}
+
+enum OrderStatus {
+  DRAFT
+  PENDING_CONFIRMATION
+  PENDING_DESK_REVIEW
+  APPROVED
+  REJECTED
+  DISPATCHED
+}
+
+enum OrderSource {
+  APP
+  AI_TEXT
+  AI_VOICE
+  AI_PHOTO
+  SALESMAN_OFFLINE
+}
+
+enum SchemeType {
+  FREE_GOODS     // e.g., Buy 10 cases get 1 free
+  SLAB_PERCENT   // e.g., 3% off on 5 or more cases
+  SPECIAL_PRICE  // e.g., Flat discounted rate
+}
+
+model User {
+  id        String   @id @default(uuid())
+  phone     String   @unique
+  role      Role     @default(RETAILER)
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  retailer  Retailer?
+  auditLogs AuditLog[]
+
+  @@map("users")
+}
+
+model Retailer {
+  id           String   @id @default(uuid())
+  userId       String   @unique
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  shopName     String
+  ownerName    String
+  phone        String
+  address      String
+  creditLimit  Decimal  @default(50000.00) @db.Decimal(12, 2)
+  creditUsed   Decimal  @default(0.00) @db.Decimal(12, 2)
+  lastOrderAt  DateTime?
+  salesmanName String?  @default("Rajesh Sharma")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  prices    RetailerPrice[]
+  orders    Order[]
+  aliases   Alias[]
+
+  @@map("retailers")
+}
+
+model Sku {
+  code            String      @id
+  name            String
+  brand           String
+  category        String
+  unitLabel       String      // e.g., "case of 96", "case of 20", "case of 40"
+  piecesPerCase   Int         @default(1)
+  dealerPrice     Decimal     @db.Decimal(10, 2) // Per-piece price as specified in sample data
+  casePrice       Decimal     @db.Decimal(10, 2) // Calculated case price (dealerPrice * piecesPerCase)
+  gstIncluded     Boolean     @default(false)
+  gstRate         Decimal     @default(18.00) @db.Decimal(5, 2)
+  stockCases      Int         @default(0)
+  imageUrl        String?
+  isActive        Boolean     @default(true)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  retailerPrices  RetailerPrice[]
+  schemes         Scheme[]
+  orderLines      OrderLine[]
+  aliases         Alias[]
+
+  @@map("skus")
+}
+
+model RetailerPrice {
+  id          String   @id @default(uuid())
+  retailerId  String
+  skuCode     String
+  dealerPrice Decimal  @db.Decimal(10, 2) // Custom piece price for this retailer
+  casePrice   Decimal  @db.Decimal(10, 2)
+  retailer    Retailer @relation(fields: [retailerId], references: [id], onDelete: Cascade)
+  sku         Sku      @relation(fields: [skuCode], references: [code], onDelete: Cascade)
+
+  @@unique([retailerId, skuCode])
+  @@map("retailer_prices")
+}
+
+model Scheme {
+  id          String     @id @default(uuid())
+  skuCode     String
+  sku         Sku        @relation(fields: [skuCode], references: [code], onDelete: Cascade)
+  type        SchemeType
+  title       String     // "Buy 10 cases get 1 free" or "3% off 5+ cases"
+  description String
+  configJson  String     // Serialized JSON with buyQty, freeQty, minQty, percent, etc.
+  startDate   DateTime   @default(now())
+  endDate     DateTime?
+  isActive    Boolean    @default(true)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@map("schemes")
+}
+
+model Order {
+  id             String      @id @default(uuid())
+  orderNumber    String      @unique // e.g. "ORD-2026-0001"
+  retailerId     String
+  retailer       Retailer    @relation(fields: [retailerId], references: [id], onDelete: Restrict)
+  status         OrderStatus @default(PENDING_DESK_REVIEW)
+  source         OrderSource @default(APP)
+  rawMessage     String?     @db.Text
+  subtotal       Decimal     @db.Decimal(12, 2)
+  discountTotal  Decimal     @default(0.00) @db.Decimal(12, 2)
+  gstTotal       Decimal     @db.Decimal(12, 2)
+  grandTotal     Decimal     @db.Decimal(12, 2)
+  creditApproved Boolean     @default(true)
+  rejectionReason String?
+  tallyExported  Boolean     @default(false)
+  tallyVoucherNo String?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  lines     OrderLine[]
+  auditLogs AuditLog[]
+
+  @@map("orders")
+}
+
+model OrderLine {
+  id             String   @id @default(uuid())
+  orderId        String
+  order          Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  skuCode        String
+  sku            Sku      @relation(fields: [skuCode], references: [code], onDelete: Restrict)
+  qtyCases       Int
+  freeCases      Int      @default(0)
+  unitPrice      Decimal  @db.Decimal(10, 2) // Per-case base price
+  discountAmount Decimal  @default(0.00) @db.Decimal(10, 2)
+  gstRate        Decimal  @db.Decimal(5, 2)
+  gstAmount      Decimal  @db.Decimal(10, 2)
+  lineTotal      Decimal  @db.Decimal(10, 2)
+  schemeApplied  String?  // Explanation: "Buy 10 get 1 free applied (1 free case)"
+  createdAt      DateTime @default(now())
+
+  @@map("order_lines")
+}
+
+model Alias {
+  id         String    @id @default(uuid())
+  retailerId String?   // Null for global aliases, specific for retailer-learned corrections
+  retailer   Retailer? @relation(fields: [retailerId], references: [id], onDelete: Cascade)
+  phrase     String    // e.g. "biscuit chhota", "washing powder 1 kilo"
+  skuCode    String
+  sku        Sku       @relation(fields: [skuCode], references: [code], onDelete: Cascade)
+  confidence Decimal   @default(1.00) @db.Decimal(3, 2)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@unique([retailerId, phrase])
+  @@map("aliases")
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  orderId   String?
+  order     Order?   @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action    String   // e.g. "LINE_EDITED", "STATUS_APPROVED", "TALLY_EXPORTED"
+  details   String?  @db.Text
+  createdAt DateTime @default(now())
+
+  @@map("audit_logs")
+}
