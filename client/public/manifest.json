@@ -1,0 +1,16 @@
+{
+  "short_name": "KiranaOrder",
+  "name": "FMCG Kirana Retailer Ordering App",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "type": "image/svg+xml",
+      "sizes": "192x192 512x512"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#ffffff",
+  "theme_color": "#16a34a",
+  "display": "standalone",
+  "orientation": "portrait"
+}

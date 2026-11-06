@@ -1,0 +1,15 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    -webkit-tap-highlight-color: transparent;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+}
+
+/* Touch-friendly min heights for 3G kirana mobile usage */
+button, input, select, textarea {
+  touch-action: manipulation;
+}
