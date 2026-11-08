@@ -1,7 +1,7 @@
 # FMCG Kirana Retailer Ordering App - Deployment & Environment Guide
-
 **Client:** Company A, Jabalpur  
-**Solution:** FMCG Distributor Retailer Ordering App with Multimodal AI Order Capture  
+**Solution:** FMCG Distributor Retailer Ordering App with Pure Native MySQL 8 & Multimodal AI Order Capture  
+**Database:** Pure Native MySQL 8.0+ (No Prisma, No SQLite)  
 **Target Region:** Jabalpur & Mahakaushal Region, Madhya Pradesh  
 
 ---
@@ -11,7 +11,7 @@
 ### Prerequisites
 - **Node.js**: v18.0.0 or higher
 - **npm**: v9.0.0 or higher
-- **Database**: Prisma ORM with SQLite (zero-config, persistent `dev.db`) or MySQL 8.0+
+- **Database**: MySQL 8.0+ running on `localhost:3306`
 
 ### Installation & Launch Steps
 From the root repository directory:
@@ -20,10 +20,22 @@ From the root repository directory:
 # 1. Install dependencies for all workspaces (client and server)
 npm install
 
-# 2. Run deterministic unit test suite (Scheme Engine & AI Parser)
-npm test
+# 2. Configure MySQL Database
+# Create the database in MySQL:
+mysql -u root -p -e "CREATE DATABASE IF NOT EXISTS kirana_order CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
 
-# 3. Start development servers (Frontend on port 5173, Backend API on port 5000)
+# Apply the pure native SQL schema (DDL):
+# On Windows PowerShell:
+Get-Content server/src/db/schema.sql -Raw | mysql -u root -p kirana_order
+# On Linux / macOS:
+mysql -u root -p kirana_order < server/src/db/schema.sql
+
+# 3. Run automated verification test suite (25/25 Tests Passing)
+cd server
+npm test
+cd ..
+
+# 4. Start development servers (Frontend on port 5173, Backend API on port 5000)
 npm run dev
 ```
 
@@ -31,21 +43,22 @@ npm run dev
 
 ## 2. Environment Variables Specification
 
-Configure the following environment variable names in your hosting environment (e.g., Render, Railway, Vercel, AWS ECS) or in `server/.env`.
-
-> [!NOTE]
-> Per security and assignment submission guidelines, only variable names and functional descriptions are listed below. Do not commit actual production credentials or passwords to version control.
+Configure the following environment variable names in `server/.env`:
 
 | Environment Variable Name | Required | Functional Purpose |
 |---|---|---|
-| `PORT` | Optional | Port on which the Express backend HTTP server listens |
+| `PORT` | Optional | Port on which the Express backend HTTP server listens (default: `5000`) |
 | `NODE_ENV` | Optional | Runtime environment mode (`development`, `production`, `test`) |
-| `DATABASE_URL` | Required for MySQL | Database connection URI for Prisma ORM |
+| `DATABASE_URL` | **Required** | Pure MySQL connection URI (`mysql://user:password@host:port/database`) |
+| `DB_HOST` | Optional | Database host (fallback if `DATABASE_URL` not set, default: `127.0.0.1`) |
+| `DB_PORT` | Optional | Database port (default: `3306`) |
+| `DB_USER` | Optional | MySQL username (default: `root`) |
+| `DB_PASSWORD` | Optional | MySQL password |
+| `DB_NAME` | Optional | MySQL database name (default: `kirana_order`) |
 | `JWT_SECRET` | Required | Cryptographic secret key used for signing and verifying JSON Web Tokens |
-| `OTP_DEMO_CODE` | Optional | Fixed OTP bypass code for rapid test evaluation in non-production environments |
+| `OTP_DEMO_CODE` | Optional | Fixed OTP bypass code for rapid test evaluation in non-production environments (`123456`) |
 | `GEMINI_API_KEY` | Optional | Google Gemini API key for multimodal AI order transcription and vision OCR |
-| `LLM_API_KEY` | Optional | Alternative environment variable name for AI LLM API provider key |
-| `CLIENT_ORIGIN` | Required | Allowed CORS origin for frontend client requests |
+| `CLIENT_ORIGIN` | Required | Allowed CORS origin for frontend client requests (`http://localhost:5173`) |
 
 ---
 
@@ -63,6 +76,11 @@ The system includes 1-tap demo switching in the top navigation bar, as well as O
   - Demo OTP: `123456`
   - Staff: *Priya Jain (Order Desk Lead)*
   - Privileges: Review queue, managerial credit override, line editing, Tally XML & CSV exports, operations dashboard.
+- **Salesman Account:**
+  - Phone: `9826077777`
+  - Demo OTP: `123456`
+  - Staff: *Rajesh Sharma (Salesman - Jabalpur Central)*
+  - Privileges: Mobile PWA, offline order entry, store route orders.
 
 ---
 
@@ -79,4 +97,4 @@ The system includes 1-tap demo switching in the top navigation bar, as well as O
 - **Root Directory:** `server`
 - **Build Command:** `npm run build`
 - **Start Command:** `npm start`
-- **Database Engine:** Managed MySQL 8 (AWS RDS, PlanetScale, Railway, or Aiven) or persistent volume SQLite.
+- **Database Engine:** Managed MySQL 8 (AWS RDS, PlanetScale, Railway, or self-hosted MySQL 8).

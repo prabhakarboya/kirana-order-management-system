@@ -4,6 +4,17 @@ export async function seedDatabase() {
   console.log('Seeding FMCG database for Company A, Jabalpur...');
 
   // Clear existing records to ensure clean idempotent seed
+  await prisma.offlineSyncQueue.deleteMany();
+  await prisma.exportHistory.deleteMany();
+  await prisma.aiOrderCaptureRecord.deleteMany();
+  await prisma.orderStatusHistory.deleteMany();
+  await prisma.schemeRule.deleteMany();
+  await prisma.creditAccount.deleteMany();
+  await prisma.retailerSalesmanAssignment.deleteMany();
+  await prisma.salesman.deleteMany();
+  await prisma.productImage.deleteMany();
+  await prisma.category.deleteMany();
+  await prisma.brand.deleteMany();
   await prisma.auditLog.deleteMany();
   await prisma.orderLine.deleteMany();
   await prisma.order.deleteMany();
@@ -14,7 +25,25 @@ export async function seedDatabase() {
   await prisma.user.deleteMany();
   await prisma.sku.deleteMany();
 
-  // 1. Seed SKUs from the brief
+  // 1. Seed Brands & Categories (Distributor for 4 packaged food and home-care brands)
+  await prisma.brand.createMany({
+    data: [
+      { id: 'BRD-001', code: 'PARLE', name: 'Parle Products', description: 'Packaged Biscuits and Snacks' },
+      { id: 'BRD-002', code: 'HUL', name: 'Hindustan Unilever', description: 'Home and Fabric Care' },
+      { id: 'BRD-003', code: 'TATA', name: 'Tata Consumer Products', description: 'Tea, Coffee and Food Essentials' },
+      { id: 'BRD-004', code: 'ITC', name: 'ITC Foods', description: 'Packaged Foods and Confectionery' },
+    ],
+  });
+
+  await prisma.category.createMany({
+    data: [
+      { id: 'CAT-001', name: 'Biscuits', description: 'Glucose, Marie, Cream and Sweet biscuits' },
+      { id: 'CAT-002', name: 'Home Care', description: 'Detergent powders, soaps, dishwash and cleaners' },
+      { id: 'CAT-003', name: 'Beverages', description: 'Tea leaf, tea dust, coffee and beverage mixes' },
+    ],
+  });
+
+  // 2. Seed SKUs from the brief
   const skus = [
     {
       code: 'SKU-BS-075',
@@ -64,7 +93,7 @@ export async function seedDatabase() {
     await prisma.sku.create({ data: s });
   }
 
-  // 2. Seed Trade Schemes
+  // 3. Seed Trade Schemes and Scheme Rules
   await prisma.scheme.create({
     data: {
       id: 'SCH-001',
@@ -89,7 +118,30 @@ export async function seedDatabase() {
     },
   });
 
-  // 3. Seed Users & Retailers
+  await prisma.schemeRule.createMany({
+    data: [
+      {
+        id: 'RULE-001',
+        schemeId: 'SCH-001',
+        ruleType: 'FREE_GOODS',
+        minQty: 10,
+        discountPercent: 0,
+        freeSkuCode: 'SKU-BS-075',
+        freeQty: 1,
+      },
+      {
+        id: 'RULE-002',
+        schemeId: 'SCH-002',
+        ruleType: 'SLAB_PERCENT',
+        minQty: 5,
+        discountPercent: 3.0,
+        freeSkuCode: null,
+        freeQty: 0,
+      },
+    ],
+  });
+
+  // 4. Seed Users, Salesmen & Retailers
   // Desk User
   await prisma.user.create({
     data: {
@@ -99,6 +151,49 @@ export async function seedDatabase() {
       role: 'DESK',
       otpCode: '123456',
       otpExpiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+    },
+  });
+
+  // Salesmen
+  const sm1User = await prisma.user.create({
+    data: {
+      id: 'USR-SM-1',
+      phone: '9826077777',
+      name: 'Rajesh Sharma (Salesman)',
+      role: 'SALESMAN',
+      otpCode: '123456',
+      otpExpiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+    },
+  });
+  const sm1 = await prisma.salesman.create({
+    data: {
+      id: 'SM-001',
+      userId: sm1User.id,
+      name: 'Rajesh Sharma',
+      phone: '9826077777',
+      territory: 'Jabalpur Central & Gorakhpur',
+      isActive: true,
+    },
+  });
+
+  const sm2User = await prisma.user.create({
+    data: {
+      id: 'USR-SM-2',
+      phone: '9826088888',
+      name: 'Vikas Tiwari (Salesman)',
+      role: 'SALESMAN',
+      otpCode: '123456',
+      otpExpiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+    },
+  });
+  const sm2 = await prisma.salesman.create({
+    data: {
+      id: 'SM-002',
+      userId: sm2User.id,
+      name: 'Vikas Tiwari',
+      phone: '9826088888',
+      territory: 'Jabalpur North & Wright Town',
+      isActive: true,
     },
   });
 
@@ -215,7 +310,27 @@ export async function seedDatabase() {
     },
   });
 
-  // 4. Seed Aliases (Global & Retailer-specific)
+  // Seed Retailer Credit Accounts & Sanctioned Limits
+  await prisma.creditAccount.createMany({
+    data: [
+      { retailerId: ret1.id, creditLimit: 75000.0, creditUsed: 12500.0, creditAvailable: 62500.0, status: 'ACTIVE', paymentTermsDays: 7 },
+      { retailerId: 'RET-002', creditLimit: 50000.0, creditUsed: 46800.0, creditAvailable: 3200.0, status: 'ACTIVE', paymentTermsDays: 7 },
+      { retailerId: ret3.id, creditLimit: 100000.0, creditUsed: 15000.0, creditAvailable: 85000.0, status: 'ACTIVE', paymentTermsDays: 14 },
+      { retailerId: 'RET-004', creditLimit: 30000.0, creditUsed: 0.0, creditAvailable: 30000.0, status: 'ACTIVE', paymentTermsDays: 7 },
+    ],
+  });
+
+  // Seed Salesman Territory Route Assignments
+  await prisma.retailerSalesmanAssignment.createMany({
+    data: [
+      { retailerId: ret1.id, salesmanId: sm1.id, isPrimary: true },
+      { retailerId: 'RET-002', salesmanId: sm1.id, isPrimary: true },
+      { retailerId: ret3.id, salesmanId: sm2.id, isPrimary: true },
+      { retailerId: 'RET-004', salesmanId: sm1.id, isPrimary: true },
+    ],
+  });
+
+  // 5. Seed Aliases (Global & Retailer-specific)
   await prisma.alias.createMany({
     data: [
       { phrase: 'biscuit chhota', skuCode: 'SKU-BS-075', confidence: 0.95 },
@@ -339,6 +454,45 @@ export async function seedDatabase() {
           },
         ],
       },
+    },
+  });
+
+  // Seed Order Status History & AI Capture Records
+  await prisma.orderStatusHistory.createMany({
+    data: [
+      {
+        orderId: ord1.id,
+        statusFrom: 'PENDING_DESK_REVIEW',
+        statusTo: 'APPROVED',
+        changedByName: 'Priya Jain (Order Desk)',
+        reason: 'Order verified and approved for dispatch. Tally voucher generated.',
+        timestamp: new Date('2026-11-03T10:15:00.000Z'),
+      },
+      {
+        orderId: 'ORD-2026-0002',
+        statusFrom: 'NEW_CAPTURE',
+        statusTo: 'PENDING_DESK_REVIEW',
+        changedByName: 'AI Capture Engine',
+        reason: 'Raw text parsed and awaiting Order Desk confirmation.',
+        timestamp: new Date(),
+      },
+    ],
+  });
+
+  await prisma.aiOrderCaptureRecord.create({
+    data: {
+      retailerId: ret1.id,
+      channel: 'TEXT',
+      rawInput: 'bhaiya 5 peti biscuit chhota, 2 peti washing powder 1 kilo, chai patti 250 wala 1 peti',
+      parsedOutputJson: JSON.stringify({
+        lines: [
+          { skuCode: 'SKU-BS-075', qty: 5, confidence: 0.98 },
+          { skuCode: 'SKU-DT-1KG', qty: 2, confidence: 0.95 },
+        ],
+        warnings: ['Tea leaf 250 g is currently out of stock (0 cases available). Omitted from draft.'],
+      }),
+      confidenceScore: 0.95,
+      reviewStatus: 'REVIEWED',
     },
   });
 

@@ -279,12 +279,12 @@ router.get('/my-orders', requireAuth, async (req: AuthenticatedRequest, res: Res
   });
 
   return res.json({
-    orders: orders.map((o) => ({
+    orders: orders.map((o: any) => ({
       ...o,
-      retailerName: o.retailer.shopName,
-      lines: o.lines.map((l) => ({
+      retailerName: o.retailer?.shopName || 'Retailer',
+      lines: (o.lines || []).map((l: any) => ({
         ...l,
-        skuName: l.sku.name,
+        skuName: l.sku?.name || l.skuCode,
       })),
     })),
   });
@@ -309,7 +309,7 @@ router.post('/:id/repeat', requireAuth, async (req: AuthenticatedRequest, res: R
     return res.status(403).json({ error: 'Access denied: You cannot access or repeat another store’s order.' });
   }
 
-  const repeatItems = order.lines.map((l) => ({
+  const repeatItems = (order.lines || []).map((l: any) => ({
     skuCode: l.skuCode,
     qtyCases: l.qtyCases,
   }));

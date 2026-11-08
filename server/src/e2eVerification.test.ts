@@ -64,6 +64,36 @@ describe('Comprehensive Production Verification Suite', () => {
       const inactive = retailers.filter((r) => !r.lastOrderAt || r.lastOrderAt < FOURTEEN_DAYS_AGO);
       expect(inactive.some((r) => r.id === 'RET-004')).toBe(true);
     });
+
+    it('persists extended relational models (Brands, Categories, Salesmen, CreditAccounts, StatusHistory)', async () => {
+      const brands = await prisma.brand.findMany();
+      expect(brands.length).toBe(4);
+      expect(brands.map((b) => b.code)).toContain('PARLE');
+      expect(brands.map((b) => b.code)).toContain('HUL');
+
+      const categories = await prisma.category.findMany();
+      expect(categories.length).toBe(3);
+      expect(categories.map((c) => c.name)).toContain('Biscuits');
+
+      const salesmen = await prisma.salesman.findMany();
+      expect(salesmen.length).toBe(2);
+      expect(salesmen.some((s) => s.name === 'Rajesh Sharma')).toBe(true);
+
+      const assignments = await prisma.retailerSalesmanAssignment.findMany();
+      expect(assignments.length).toBe(4);
+
+      const creditAccounts = await prisma.creditAccount.findMany();
+      expect(creditAccounts.length).toBe(4);
+      const acc1 = creditAccounts.find((a) => a.retailerId === 'RET-001')!;
+      expect(acc1.creditLimit).toBe(75000);
+      expect(acc1.creditUsed).toBe(12500);
+
+      const statusHistories = await prisma.orderStatusHistory.findMany();
+      expect(statusHistories.length).toBeGreaterThanOrEqual(2);
+
+      const aiRecords = await prisma.aiOrderCaptureRecord.findMany();
+      expect(aiRecords.length).toBeGreaterThanOrEqual(1);
+    });
   });
 
   describe('2. Scheme Engine Edge Cases & Calculations', () => {

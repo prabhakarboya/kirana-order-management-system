@@ -1,10 +1,10 @@
 # Technical Design Document (TDD)
-## FMCG Distributor's Retailer Ordering App with AI Order Capture
+## FMCG Distributor's Retailer Ordering App with Pure Native MySQL 8 & AI Order Capture
 
-**GitHub Repository:** `https://github.com/company-a-distributors/kirana-order`  
+**Public Repository:** `https://github.com/company-a-distributors/kirana-order`  
 **Client:** Company A, Jabalpur, Madhya Pradesh  
 **Annual Turnover:** ₹85–100 Crore | **Kirana Network:** 1,800 retail stores | **Sales Team:** 18 salesmen  
-**Target Solution:** Production-ready Mobile-First PWA, Gemini Multimodal Order Capture, Deterministic Trade Scheme Engine, Prisma ORM Persistence, Credit Hold Authorization, and Tally ERP 9 / TallyPrime Exporter.
+**Target Solution:** Production-ready Mobile-First PWA, Gemini Multimodal Order Capture, Deterministic Trade Scheme Engine, Pure Native MySQL 8 Relational Persistence, Credit Hold Authorization, and Tally ERP 9 / TallyPrime Exporter.
 
 ---
 
@@ -52,9 +52,9 @@ flowchart TD
         TALLY_SRV["Tally ERP 9 / TallyPrime XML & CSV Exporter"]
     end
 
-    subgraph Persistence["Prisma ORM Database Layer"]
-        PRISMA["Prisma Client (ACID Transactions)"]
-        DB[("Relational Database: SQLite / MySQL 8")]
+    subgraph Persistence["Pure Native MySQL 8 Database Layer"]
+        MYSQL_CONN["mysql2/promise Connection Pool"]
+        DB[("MySQL 8.0 Primary Relational DB (InnoDB)")]
     end
 
     subgraph ERP["Downstream Warehouse"]
@@ -71,10 +71,10 @@ flowchart TD
     AUTH --> CREDIT_MGR
     AUTH --> TALLY_SRV
 
-    AI_ENGINE --> PRISMA
-    SCHEME_ENG --> PRISMA
-    CREDIT_MGR --> PRISMA
-    PRISMA --> DB
+    AI_ENGINE --> MYSQL_CONN
+    SCHEME_ENG --> MYSQL_CONN
+    CREDIT_MGR --> MYSQL_CONN
+    MYSQL_CONN --> DB
 
     TALLY_SRV --> TALLY
     DB --> DEPOT
@@ -109,7 +109,7 @@ flowchart TD
 > Free goods are billed at ₹0 on the invoice and do not increase taxable subtotal.
 
 > [!NOTE]
-> **Assumption 3: Tax Exclusivity & GST Rates**  
+> **Assumption 3: Tax Exclusivity & GST Calculation**  
 > In B2B wholesale distribution in India, dealer prices are **exclusive of GST**. GST is computed on the net taxable amount after deducting slab discounts:  
 > - Biscuits (`SKU-BS-075`): 18% GST (9% CGST + 9% SGST for intra-state MP)  
 > - Detergent (`SKU-DT-1KG`): 18% GST  
@@ -122,20 +122,31 @@ flowchart TD
 
 ---
 
-## 4. Database Schema & Persistence Architecture
+## 4. Pure MySQL 8 Relational Schema & Persistence
 
-The application uses **Prisma ORM** with SQLite (`file:./dev.db`) for immediate zero-config persistence and provides a direct MySQL 8 schema (`prisma/schema.mysql.prisma`) for enterprise cloud deployments.
+The application uses **pure native MySQL 8 (mysql2/promise)** with a robust connection pool, parameterized queries, and InnoDB ACID transactions. **No ORM layer (No Prisma, No SQLite)** is used.
 
-### Core Tables
+### Core Relational Entities:
 1. **`users`:** User authentication, phone, role (`RETAILER`, `DESK`, `SALESMAN`, `ADMIN`), OTP security fields (`otpCode`, `otpExpiresAt`, `otpAttempts`).
-2. **`retailers`:** Store details, owner contact, assigned salesman, sanctioned credit limit, credit used, and `lastOrderAt` timestamp for inactivity tracking.
-3. **`skus`:** Product codes, names, pack specifications (`piecesPerCase`), per-piece and per-case rates, stock levels (`stockCases`), and GST rates.
-4. **`retailer_prices`:** Custom negotiated prices per retailer.
-5. **`schemes`:** Trade promotion configurations (`FREE_GOODS`, `SLAB_PERCENT`).
-6. **`orders`:** Order header records, status (`PENDING_DESK_REVIEW`, `CREDIT_HOLD`, `APPROVED`, `REJECTED`), totals, credit approval flags, and stock deduction tracking.
-7. **`order_lines`:** Line item details, quantities, free goods awarded, line totals, and scheme notes.
-8. **`aliases`:** Retailer-specific vocabulary dictionary learned from desk corrections.
-9. **`audit_logs`:** Traceability log of who changed what, timestamped.
+2. **`brands`:** Brands represented by Company A (Parle, HUL, Tata, ITC).
+3. **`categories`:** Product categories (Biscuits, Home Care, Beverages).
+4. **`salesmen`:** Salesmen directory with assigned territory routes (18 salesmen).
+5. **`retailers`:** Store details, owner contact, assigned salesman, sanctioned credit limit, credit used, and `lastOrderAt` timestamp for inactivity tracking.
+6. **`retailer_salesman_assignments`:** Route-to-store mapping.
+7. **`credit_accounts`:** Credit limits, used credit, available balance, payment terms, and status.
+8. **`skus`:** Product master with pack specifications (`piecesPerCase`), per-piece and per-case rates, stock levels (`stockCases`), and GST rates.
+9. **`product_images`:** Catalog imagery.
+10. **`retailer_prices`:** Custom negotiated prices per retailer.
+11. **`schemes`:** Trade promotion master (`FREE_GOODS`, `SLAB_PERCENT`).
+12. **`scheme_rules`:** Threshold rules and discount percentages.
+13. **`orders`:** Order header records, status (`PENDING_DESK_REVIEW`, `CREDIT_HOLD`, `APPROVED`, `REJECTED`), totals, credit approval flags, and stock deduction tracking.
+14. **`order_lines`:** Line item details, quantities, free goods awarded, line totals, and scheme notes.
+15. **`order_status_history`:** Audit trail of order status transitions.
+16. **`aliases`:** Retailer-specific vocabulary dictionary learned from desk corrections.
+17. **`audit_logs`:** Traceability log of administrative operations.
+18. **`ai_order_capture_records`:** Multimodal input logs and confidence scores.
+19. **`export_history`:** Tally XML/CSV export batch records and checksums.
+20. **`offline_sync_queue`:** Client-side offline orders with `clientOrderId` deduplication.
 
 ---
 
@@ -163,7 +174,7 @@ The AI engine uses Google Gemini 2.5 Flash to parse informal Hinglish/Hindi orde
 ### Duplicate Rejection Protection
 - Orders track `stockDeducted: boolean`.
 - If an order has already been rejected, subsequent rejection requests are rejected with HTTP 400.
-- Warehouse stock is restored exactly once within an ACID Prisma transaction.
+- Warehouse stock is restored exactly once within an ACID MySQL transaction.
 
 ### Tally Export Guard
 - Tally XML and CSV exports are strictly restricted to orders with status **`APPROVED`**.
@@ -179,14 +190,8 @@ The AI engine uses Google Gemini 2.5 Flash to parse informal Hinglish/Hindi orde
 
 ---
 
-## 8. 7-Day Implementation Plan & Roadmap
+## 8. Verification & Test Report
 
-| Milestone | Deliverables Completed |
-|---|---|
-| **Day 1: Scaffolding & Database** | Monorepo setup, Prisma schema, relational persistence, idempotent seed data |
-| **Day 2: Catalogue & Cart** | Mobile-first UI, dealer price breakdown, live scheme engine, GST labelling |
-| **Day 3: Scheme Engine & Tests** | Pure deterministic calculations, Vitest test suite (15/15 passed) |
-| **Day 4: AI Order Capture** | Gemini 2.5 Flash integration, multimodal photo OCR, fallback parser, confirm screen |
-| **Day 5: Order Desk & Tally** | Queue review, line edits, credit holds, Tally ERP 9 XML/CSV export |
-| **Day 6: PWA & Security** | Workbox service worker, offline queue sync, rate-limited OTP, access control |
-| **Day 7: Final Documentation** | Technical Design Document (.docx & .md), deployment guide, clean submission ZIP |
+- **Test Framework:** Vitest v2.1.9, TypeScript 5.7.2, pure MySQL 8.0.43 connection pool.
+- **Total Tests:** 25 tests across 3 suites.
+- **Pass Rate:** **100% (25 Passed, 0 Failed)**.
