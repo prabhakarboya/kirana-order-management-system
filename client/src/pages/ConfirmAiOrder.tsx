@@ -243,6 +243,14 @@ export const ConfirmAiOrder: React.FC = () => {
                       <span>Warehouse Stock: 0 Cases (Stock-out alert)</span>
                     </div>
                   )}
+
+                  {/* 0 Cases Notice */}
+                  {item.resolvedCases === 0 && (
+                    <div className="mt-2 p-2 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-xs font-bold flex items-center gap-1.5">
+                      <AlertTriangle className="w-4 h-4 flex-shrink-0 text-amber-600" />
+                      <span>0 Cases Requested (Will be omitted from final order)</span>
+                    </div>
+                  )}
                 </div>
 
                 {/* Quantity & Unit Controls */}

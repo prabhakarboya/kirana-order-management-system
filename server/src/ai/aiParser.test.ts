@@ -114,4 +114,18 @@ describe('AI Order Capture Parser Unit Tests', () => {
     expect(afterResult.items[0].skuCode).toBe('SKU-DT-1KG');
     expect(afterResult.items[0].confidence).toBe(0.98);
   });
+
+  it('correctly handles zero quantity strings like "chai patti 250 wala 0 peti"', () => {
+    const raw = 'bhaiya 5 peti biscuit chhota, 2 peti washing powder 1 kilo, chai patti 250 wala 0 peti';
+    const result = parseOrderTextFallback(raw, sampleCatalog);
+
+    expect(result.items.length).toBe(3);
+
+    const teaItem = result.items[2];
+    expect(teaItem.skuCode).toBe('SKU-TE-250');
+    expect(teaItem.requestedQty).toBe(0);
+    expect(teaItem.resolvedCases).toBe(0);
+    expect(teaItem.detectedUnit).toBe('case');
+    expect(teaItem.warning).toContain('Requested quantity is 0 cases');
+  });
 });

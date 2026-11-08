@@ -39,6 +39,9 @@ export interface RetailerAlias {
 }
 
 const HINDI_NUMERAL_MAP: Record<string, number> = {
+  shunya: 0,
+  zero: 0,
+  sifar: 0,
   ek: 1,
   do: 2,
   teen: 3,
@@ -65,7 +68,7 @@ const HINDI_NUMERAL_MAP: Record<string, number> = {
   sau: 100,
 };
 
-const CASE_UNIT_KEYWORDS = ['peti', 'petee', 'paeti', 'case', 'box', 'boxes', 'carton', 'cartons', 'crate', 'crates'];
+const CASE_UNIT_KEYWORDS = ['peti', 'petee', 'paeti', 'case', 'cases', 'box', 'boxes', 'carton', 'cartons', 'crate', 'crates'];
 const PIECE_UNIT_KEYWORDS = ['packet', 'packets', 'pkt', 'pkts', 'piece', 'pieces', 'pcs', 'pc', 'khula', 'khulla', 'pauchi', 'pouch', 'pouches'];
 
 export function cleanRawMessage(text: string): string {
@@ -82,9 +85,10 @@ function extractQtyAndUnit(phrase: string): {
   remainingText: string;
 } {
   let cleaned = phrase.toLowerCase().trim();
-  let qty = 1;
+  let qty: number | null = null;
   let unit: 'case' | 'piece' | 'unclear' = 'unclear';
 
+  // 1. Check Hindi numeral words first
   for (const [word, val] of Object.entries(HINDI_NUMERAL_MAP)) {
     const reg = new RegExp(`\\b${word}\\b`, 'i');
     if (reg.test(cleaned)) {
@@ -94,29 +98,36 @@ function extractQtyAndUnit(phrase: string): {
     }
   }
 
-  const qtyMatch = cleaned.match(/\b(\d+)\s*(peti|petee|case|box|carton|packet|piece|pcs|pkt)?\b/);
-  if (qtyMatch) {
-    const matchedNumber = parseInt(qtyMatch[1], 10);
-    const isSpecGram =
-      cleaned.includes(`${matchedNumber} wala`) ||
-      cleaned.includes(`${matchedNumber}wala`) ||
-      cleaned.includes(`${matchedNumber} g`) ||
-      cleaned.includes(`${matchedNumber}g`) ||
-      cleaned.includes(`${matchedNumber} gm`) ||
-      cleaned.includes(`${matchedNumber} kilo`) ||
-      cleaned.includes(`${matchedNumber}kg`);
+  // 2. Identify all numbers and suffixes (distinguishing specs like "250 wala", "1 kg" from quantities)
+  const regex = /\b(\d+)\s*([a-zA-Z]+)?\b/g;
+  let match: RegExpExecArray | null;
+  const candidates: Array<{ full: string; num: number; suffix: string; isSpec: boolean }> = [];
+  while ((match = regex.exec(cleaned)) !== null) {
+    const num = parseInt(match[1], 10);
+    const suffix = (match[2] || '').toLowerCase();
+    const isSpec = ['wala', 'wale', 'g', 'gm', 'gms', 'gram', 'grams', 'kg', 'kilo', 'kilos', 'ml', 'ltr', 'litre'].includes(suffix);
+    candidates.push({ full: match[0], num, suffix, isSpec });
+  }
 
-    if (!isSpecGram) {
-      qty = matchedNumber;
-      if (qtyMatch[2]) {
-        const u = qtyMatch[2].toLowerCase();
-        if (CASE_UNIT_KEYWORDS.includes(u)) unit = 'case';
-        else if (PIECE_UNIT_KEYWORDS.includes(u)) unit = 'piece';
-      }
-      cleaned = cleaned.replace(qtyMatch[0], ' ');
+  // Candidate with explicit unit keyword attached (e.g. "0 peti", "5 peti", "10 packets")
+  const unitCandidate = candidates.find(
+    (c) => !c.isSpec && (CASE_UNIT_KEYWORDS.includes(c.suffix) || PIECE_UNIT_KEYWORDS.includes(c.suffix))
+  );
+
+  if (unitCandidate) {
+    qty = unitCandidate.num;
+    unit = CASE_UNIT_KEYWORDS.includes(unitCandidate.suffix) ? 'case' : 'piece';
+    cleaned = cleaned.replace(unitCandidate.full, ' ');
+  } else {
+    // Non-spec number candidate
+    const nonSpec = candidates.find((c) => !c.isSpec);
+    if (nonSpec) {
+      qty = nonSpec.num;
+      cleaned = cleaned.replace(nonSpec.full, ' ');
     }
   }
 
+  // Check standalone unit keywords if unit is still unclear
   if (unit === 'unclear') {
     for (const kw of CASE_UNIT_KEYWORDS) {
       if (new RegExp(`\\b${kw}\\b`, 'i').test(cleaned)) {
@@ -125,15 +136,20 @@ function extractQtyAndUnit(phrase: string): {
         break;
       }
     }
-  }
-  if (unit === 'unclear') {
-    for (const kw of PIECE_UNIT_KEYWORDS) {
-      if (new RegExp(`\\b${kw}\\b`, 'i').test(cleaned)) {
-        unit = 'piece';
-        cleaned = cleaned.replace(new RegExp(`\\b${kw}\\b`, 'ig'), ' ');
-        break;
+    if (unit === 'unclear') {
+      for (const kw of PIECE_UNIT_KEYWORDS) {
+        if (new RegExp(`\\b${kw}\\b`, 'i').test(cleaned)) {
+          unit = 'piece';
+          cleaned = cleaned.replace(new RegExp(`\\b${kw}\\b`, 'ig'), ' ');
+          break;
+        }
       }
     }
+  }
+
+  // If no quantity detected at all, default to 1 (Kirana convention: requesting an item implies 1)
+  if (qty === null) {
+    qty = 1;
   }
 
   return { qty, unit, remainingText: cleaned.replace(/\s+/g, ' ').trim() };
@@ -210,6 +226,11 @@ export function parseOrderTextFallback(
         stockStatus = 'LOW_STOCK';
         warning = `Low stock: Only ${matchedSku.stockCases} cases remaining.`;
       }
+    }
+
+    if (qty === 0) {
+      const zeroNotice = 'Requested quantity is 0 cases (item will be omitted unless quantity is increased).';
+      warning = warning ? `${warning} ${zeroNotice}` : zeroNotice;
     }
 
     // Clarification logic: NEVER guess unclear units!
