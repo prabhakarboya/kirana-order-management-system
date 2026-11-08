@@ -1,12 +1,27 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import { dbStore, UserRecord } from '../db/store.js';
+import { prisma } from '../db/prisma.js';
 
-export interface AuthenticatedRequest extends Request {
-  user?: UserRecord;
+export interface AuthenticatedUser {
+  id: string;
+  phone: string;
+  name: string;
+  role: string;
+  retailer?: {
+    id: string;
+    shopName: string;
+    creditLimit: number;
+    creditUsed: number;
+  } | null;
 }
 
-export function requireAuth(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+export interface AuthenticatedRequest extends Request {
+  user?: AuthenticatedUser;
+}
+
+const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret_fmcg_distributor_jabalpur_2026';
+
+export async function requireAuth(req: AuthenticatedRequest, res: Response, next: NextFunction) {
   const token = req.cookies?.token || req.headers.authorization?.replace('Bearer ', '');
 
   if (!token) {
@@ -14,17 +29,34 @@ export function requireAuth(req: AuthenticatedRequest, res: Response, next: Next
   }
 
   try {
-    const jwtSecret = process.env.JWT_SECRET || 'kirana_fmcg_distributor_jabalpur_secret_key_2026_xyz';
-    const decoded = jwt.verify(token, jwtSecret) as { userId: string };
-    const user = dbStore.users.find((u) => u.id === decoded.userId);
+    const decoded = jwt.verify(token, JWT_SECRET) as { userId: string };
 
-    if (!user) {
+    const dbUser = await prisma.user.findUnique({
+      where: { id: decoded.userId },
+      include: { retailer: true },
+    });
+
+    if (!dbUser) {
       return res.status(401).json({ error: 'User session invalid. Please login again.' });
     }
 
-    req.user = user;
+    req.user = {
+      id: dbUser.id,
+      phone: dbUser.phone,
+      name: dbUser.name,
+      role: dbUser.role,
+      retailer: dbUser.retailer
+        ? {
+            id: dbUser.retailer.id,
+            shopName: dbUser.retailer.shopName,
+            creditLimit: dbUser.retailer.creditLimit,
+            creditUsed: dbUser.retailer.creditUsed,
+          }
+        : null,
+    };
+
     next();
-  } catch (err) {
+  } catch {
     return res.status(401).json({ error: 'Session expired or invalid token.' });
   }
 }

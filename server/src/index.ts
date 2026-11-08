@@ -4,6 +4,9 @@ import cookieParser from 'cookie-parser';
 import dotenv from 'dotenv';
 import path from 'path';
 
+import { prisma } from './db/prisma.js';
+import { seedDatabase } from './seed.js';
+
 import authRoutes from './routes/auth.js';
 import catalogRoutes from './routes/catalog.js';
 import orderRoutes from './routes/orders.js';
@@ -16,7 +19,6 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
 
-// CORS configuration supporting credentials for httpOnly JWT cookie
 app.use(
   cors({
     origin: CLIENT_ORIGIN,
@@ -35,19 +37,39 @@ app.use('/api/ai', aiRoutes);
 app.use('/api/desk', deskRoutes);
 
 // Health check endpoint
-app.get('/api/health', (_req, res) => {
-  res.json({
-    status: 'ok',
-    app: 'kirana-order-backend',
-    clientOrigin: CLIENT_ORIGIN,
-    timestamp: new Date().toISOString(),
-  });
+app.get('/api/health', async (_req, res) => {
+  try {
+    const skuCount = await prisma.sku.count();
+    res.json({
+      status: 'ok',
+      database: 'connected',
+      skuCount,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err: any) {
+    res.status(500).json({ status: 'error', error: err.message });
+  }
 });
 
-app.listen(PORT, () => {
-  console.log(`=======================================================`);
-  console.log(` FMCG Kirana Distributor Server (Company A, Jabalpur) `);
-  console.log(` Running on: http://localhost:${PORT}`);
-  console.log(` API Health: http://localhost:${PORT}/api/health`);
-  console.log(`=======================================================`);
-});
+// Auto-seed if database is empty on start
+async function startServer() {
+  try {
+    const skuCount = await prisma.sku.count();
+    if (skuCount === 0) {
+      console.log('Database empty. Running initial seed...');
+      await seedDatabase();
+    }
+  } catch (err) {
+    console.warn('Initial seed check error:', err);
+  }
+
+  app.listen(PORT, () => {
+    console.log(`=======================================================`);
+    console.log(` FMCG Kirana Distributor Server (Company A, Jabalpur) `);
+    console.log(` Running on: http://localhost:${PORT}`);
+    console.log(` API Health: http://localhost:${PORT}/api/health`);
+    console.log(`=======================================================`);
+  });
+}
+
+startServer();

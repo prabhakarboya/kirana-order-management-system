@@ -4,6 +4,7 @@ export type OrderStatus =
   | 'DRAFT'
   | 'PENDING_CONFIRMATION'
   | 'PENDING_DESK_REVIEW'
+  | 'CREDIT_HOLD'
   | 'APPROVED'
   | 'REJECTED'
   | 'DISPATCHED';
@@ -112,7 +113,7 @@ export interface AiParseResponse {
   items: AiParsedItem[];
   allResolved: boolean;
   needsClarification: boolean;
-  parserMode: 'llm' | 'deterministic_fallback';
+  parserMode: 'llm' | 'gemini_llm' | 'deterministic_fallback';
 }
 
 export interface OrderRecord {
