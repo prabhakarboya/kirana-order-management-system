@@ -752,13 +752,13 @@ export const db = {
 };
 
 // Helper to attach nested relations for orders
-async function attachOrderRelations(order: any, include?: any) {
+async function attachOrderRelations(order: any, include?: any, executor: any = pool) {
   if (!order) return;
   if (include?.lines) {
-    const [lineRows] = await pool.query('SELECT * FROM order_lines WHERE orderId = ?', [order.id]);
+    const [lineRows] = await executor.query('SELECT * FROM order_lines WHERE orderId = ?', [order.id]);
     const lines = lineRows as any[];
     if (include.lines.include?.sku) {
-      const [skuRows] = await pool.query('SELECT * FROM skus');
+      const [skuRows] = await executor.query('SELECT * FROM skus');
       const skus = skuRows as any[];
       for (const line of lines) {
         line.sku = skus.find((s) => s.code === line.skuCode) || null;
@@ -767,11 +767,11 @@ async function attachOrderRelations(order: any, include?: any) {
     order.lines = lines;
   }
   if (include?.auditLogs) {
-    const [auditRows] = await pool.query('SELECT * FROM audit_logs WHERE orderId = ? ORDER BY timestamp ASC', [order.id]);
+    const [auditRows] = await executor.query('SELECT * FROM audit_logs WHERE orderId = ? ORDER BY timestamp ASC', [order.id]);
     order.auditLogs = auditRows as any[];
   }
   if (include?.retailer) {
-    const [retRows] = await pool.query('SELECT * FROM retailers WHERE id = ? LIMIT 1', [order.retailerId]);
+    const [retRows] = await executor.query('SELECT * FROM retailers WHERE id = ? LIMIT 1', [order.retailerId]);
     order.retailer = (retRows as any[])[0] || null;
   }
 }
@@ -827,7 +827,7 @@ async function executeOrderCreation(executor: any, data: any) {
 
   const [rows] = await executor.query('SELECT * FROM orders WHERE id = ?', [id]);
   const created = (rows as any[])[0];
-  await attachOrderRelations(created, { lines: true, auditLogs: true });
+  await attachOrderRelations(created, { lines: true, auditLogs: true }, executor);
   return created;
 }
 
