@@ -60,11 +60,30 @@ export const DeskOrderDetail: React.FC = () => {
   };
 
   const handleApprove = async () => {
+    let overrideCreditHold = false;
+    let overrideReason = '';
+
+    if (order?.status === 'CREDIT_HOLD') {
+      const confirmOverride = window.confirm(
+        'CREDIT HOLD WARNING:\nThis retailer has exceeded their sanctioned credit limit.\n\nDo you want to grant a Managerial Credit Override to approve dispatch?'
+      );
+      if (!confirmOverride) return;
+      overrideReason = window.prompt('Enter Managerial Override Justification / Reference:') || 'Authorized by Desk Lead';
+      overrideCreditHold = true;
+    }
+
     try {
-      const res = await fetch(`/api/desk/orders/${id}/approve`, { method: 'POST' });
+      const res = await fetch(`/api/desk/orders/${id}/approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ overrideCreditHold, overrideReason }),
+      });
+      const data = await res.json();
       if (res.ok) {
         setActionMessage('Order approved successfully! Ready for warehouse packing.');
         fetchOrderDetail();
+      } else {
+        alert(data.error || 'Failed to approve order');
       }
     } catch {
       alert('Failed to approve order');
@@ -72,6 +91,11 @@ export const DeskOrderDetail: React.FC = () => {
   };
 
   const handleReject = async () => {
+    if (order?.status === 'REJECTED') {
+      alert('Order is already rejected.');
+      return;
+    }
+
     const reason = window.prompt('Enter rejection reason (e.g. stock-out, retailer cancelled):');
     if (!reason) return;
 
@@ -81,9 +105,12 @@ export const DeskOrderDetail: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reason }),
       });
+      const data = await res.json();
       if (res.ok) {
-        setActionMessage(`Order rejected: ${reason}`);
+        setActionMessage(`Order rejected: ${reason}. Warehouse stock has been restored.`);
         fetchOrderDetail();
+      } else {
+        alert(data.error || 'Failed to reject order');
       }
     } catch {
       alert('Failed to reject order');
@@ -94,7 +121,6 @@ export const DeskOrderDetail: React.FC = () => {
     try {
       const aliasesToLearn: Array<{ phrase: string; skuCode: string }> = [];
       if (learnAlias && order?.rawMessage) {
-        // Automatically link raw message keywords as learned aliases
         aliasesToLearn.push({
           phrase: order.rawMessage.slice(0, 30),
           skuCode: editableLines[0]?.skuCode || 'SKU-BS-075',
@@ -121,8 +147,11 @@ export const DeskOrderDetail: React.FC = () => {
   };
 
   const handleDownloadTally = (format: 'xml' | 'csv') => {
+    if (order?.status !== 'APPROVED') {
+      alert(`Cannot export to Tally: Only APPROVED orders can be exported. Current status is ${order?.status}.`);
+      return;
+    }
     window.open(`/api/desk/orders/${id}/export-tally?format=${format}`, '_blank');
-    // Refresh to show tally exported badge
     setTimeout(fetchOrderDetail, 1000);
   };
 
@@ -405,8 +434,19 @@ export const DeskOrderDetail: React.FC = () => {
           </div>
         )}
 
+        {/* Credit Hold Banner */}
+        {order.status === 'CREDIT_HOLD' && (
+          <div className="mt-4 p-3 bg-amber-50 border border-amber-300 rounded-xl text-amber-900 text-xs flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0" />
+            <div>
+              <span className="font-bold block">Credit Hold Active:</span>
+              This order exceeds the store's sanctioned credit limit. Approval requires explicit managerial override.
+            </div>
+          </div>
+        )}
+
         {/* Desk Action Buttons (Approve / Reject) */}
-        {order.status === 'PENDING_DESK_REVIEW' && (
+        {(order.status === 'PENDING_DESK_REVIEW' || order.status === 'CREDIT_HOLD') && (
           <div className="mt-6 pt-4 border-t border-slate-200 flex flex-wrap gap-3 justify-end">
             <button
               onClick={handleReject}
@@ -417,10 +457,18 @@ export const DeskOrderDetail: React.FC = () => {
             </button>
             <button
               onClick={handleApprove}
-              className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-sm"
+              className={`px-6 py-2.5 rounded-xl text-white text-xs font-bold transition flex items-center gap-1.5 shadow-sm ${
+                order.status === 'CREDIT_HOLD'
+                  ? 'bg-amber-600 hover:bg-amber-700'
+                  : 'bg-emerald-600 hover:bg-emerald-700'
+              }`}
             >
               <CheckCircle className="w-4 h-4" />
-              <span>{t('approve')} Order for Dispatch</span>
+              <span>
+                {order.status === 'CREDIT_HOLD'
+                  ? 'Authorize Credit Override & Approve'
+                  : `${t('approve')} Order for Dispatch`}
+              </span>
             </button>
           </div>
         )}

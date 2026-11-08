@@ -72,20 +72,34 @@ export const ConfirmAiOrder: React.FC = () => {
   };
 
   const handleConfirmAndProceed = async () => {
-    // Filter out unmapped or zero items
-    const validLines = items.filter((i) => i.skuCode && i.resolvedCases > 0);
-    if (!validLines.length) {
-      setError('Please resolve at least one SKU to proceed.');
+    // Strict validation: NEVER allow unresolved lines to be submitted!
+    const unresolved = items.find((i) => !i.skuCode || i.detectedUnit === 'unclear');
+    if (unresolved) {
+      setError(`Cannot place order: Please resolve unit (case vs piece) or select a SKU for "${unresolved.originalText}".`);
       return;
     }
 
-    // Check if any out-of-stock items are still included
-    const hasOutOfStock = validLines.some((i) => i.stockStatus === 'OUT_OF_STOCK');
-    if (hasOutOfStock) {
-      const proceedAnyway = window.confirm(
-        'Warning: Your order contains out-of-stock items (such as Tea Leaf). These items will be flagged for desk review and may be cut. Do you want to proceed?'
+    // Filter out zero-case items
+    const validLines = items.filter((i) => i.skuCode && i.resolvedCases > 0);
+    if (!validLines.length) {
+      setError('Please add at least one valid item with quantity > 0.');
+      return;
+    }
+
+    // Out of stock guard: exclude or prompt
+    const outOfStockItems = validLines.filter((i) => i.stockStatus === 'OUT_OF_STOCK');
+    if (outOfStockItems.length > 0) {
+      const names = outOfStockItems.map((o) => o.skuName).join(', ');
+      const proceed = window.confirm(
+        `Warehouse Alert: The following items have 0 stock: ${names}.\n\nClick OK to omit out-of-stock items and proceed with in-stock lines, or Cancel to edit.`
       );
-      if (!proceedAnyway) return;
+      if (!proceed) return;
+    }
+
+    const deliverableLines = validLines.filter((i) => i.stockStatus !== 'OUT_OF_STOCK');
+    if (deliverableLines.length === 0) {
+      setError('All items in this order are out of stock. Cannot submit order.');
+      return;
     }
 
     setSubmitting(true);
@@ -97,7 +111,7 @@ export const ConfirmAiOrder: React.FC = () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          items: validLines.map((l) => ({ skuCode: l.skuCode, qtyCases: l.resolvedCases })),
+          items: deliverableLines.map((l) => ({ skuCode: l.skuCode, qtyCases: l.resolvedCases })),
           source: 'AI_TEXT',
           rawMessage: parseData?.rawMessage,
         }),

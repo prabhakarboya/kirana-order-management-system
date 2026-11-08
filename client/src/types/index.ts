@@ -4,6 +4,7 @@ export type OrderStatus =
   | 'DRAFT'
   | 'PENDING_CONFIRMATION'
   | 'PENDING_DESK_REVIEW'
+  | 'CREDIT_HOLD'
   | 'APPROVED'
   | 'REJECTED'
   | 'DISPATCHED';

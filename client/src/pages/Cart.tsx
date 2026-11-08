@@ -26,8 +26,37 @@ export const Cart: React.FC = () => {
 
   const handlePlaceOrder = async () => {
     if (!items.length) return;
+
+    // Check stock availability
+    const hasInsufficientStock = summary?.items.some((i) => !i.stockSufficient);
+    if (hasInsufficientStock) {
+      setErrorMessage('Cannot place order: One or more items exceed warehouse stock. Please adjust quantities.');
+      return;
+    }
+
     setSubmitting(true);
     setErrorMessage(null);
+
+    // Salesman Offline Mode Support: queue locally if device has no signal!
+    if (!navigator.onLine) {
+      const { queueOfflineOrder } = await import('../utils/offlineQueue');
+      const offline = queueOfflineOrder({
+        retailerId: user?.retailer?.id || 'RET-OFFLINE',
+        items,
+        source: 'SALESMAN_OFFLINE',
+        rawMessage: 'Salesman offline visit order',
+      });
+      setOrderSuccess({
+        orderNumber: offline.clientOrderId,
+        retailerName: user?.retailer?.shopName || 'Kirana Store',
+        grandTotal: summary?.grandTotal || 0,
+        totalSavings: summary?.totalSavings || 0,
+        isOfflineQueued: true,
+      });
+      clearCart();
+      setSubmitting(false);
+      return;
+    }
 
     try {
       const res = await fetch('/api/orders/create', {

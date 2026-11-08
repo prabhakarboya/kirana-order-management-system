@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Sparkles,
@@ -9,6 +9,8 @@ import {
   HelpCircle,
   AlertCircle,
   FileText,
+  Upload,
+  Square,
   Volume2,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -24,29 +26,141 @@ export const AiCapture: React.FC = () => {
   const [rawText, setRawText] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [isSimulatingAudio, setIsSimulatingAudio] = useState(false);
+
+  // Audio Recording State
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const timerIntervalRef = useRef<any>(null);
+
+  // File Upload Ref
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const handlePasteSample = () => {
     setRawText(SAMPLE_MESSAGE);
   };
 
-  const handleSimulateVoice = () => {
-    setIsSimulatingAudio(true);
-    setTimeout(() => {
-      setRawText(SAMPLE_MESSAGE);
-      setIsSimulatingAudio(false);
-    }, 1500);
-  };
+  // Real Photo Upload & Multimodal OCR
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
 
-  const handleSimulatePhoto = () => {
     setLoading(true);
-    setTimeout(() => {
-      setRawText(SAMPLE_MESSAGE);
+    setError(null);
+
+    const formData = new FormData();
+    formData.append('photo', file);
+
+    try {
+      const res = await fetch('/api/ai/parse-photo', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (res.ok) {
+        const data: AiParseResponse = await res.json();
+        sessionStorage.setItem('ai_order_draft', JSON.stringify(data));
+        navigate('/ai-capture/confirm');
+      } else {
+        const data = await res.json();
+        setError(data.error || 'Failed to process handwritten photo slip.');
+      }
+    } catch {
+      setError('Network error: Unable to contact multimodal OCR server.');
+    } finally {
       setLoading(false);
-    }, 1200);
+    }
   };
 
-  const handleParse = async (e: React.FormEvent) => {
+  // Real Web MediaRecorder Microphone Audio
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        stream.getTracks().forEach((track) => track.stop());
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        await uploadAudioBlob(audioBlob);
+      };
+
+      mediaRecorder.start();
+      setIsRecording(true);
+      setRecordingSeconds(0);
+      timerIntervalRef.current = setInterval(() => {
+        setRecordingSeconds((prev) => prev + 1);
+      }, 1000);
+    } catch {
+      // If mic blocked or unavailable, fall back gracefully to demo transcription
+      setError('Microphone access denied or not supported. Falling back to sample audio note.');
+      handleSampleVoiceNote();
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+      if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+    }
+  };
+
+  const uploadAudioBlob = async (blob: Blob) => {
+    setLoading(true);
+    setError(null);
+    const formData = new FormData();
+    formData.append('audio', blob, 'voice_note.webm');
+
+    try {
+      const res = await fetch('/api/ai/parse-audio', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (res.ok) {
+        const data: AiParseResponse = await res.json();
+        sessionStorage.setItem('ai_order_draft', JSON.stringify(data));
+        navigate('/ai-capture/confirm');
+      } else {
+        const data = await res.json();
+        setError(data.error || 'Failed to transcribe audio note.');
+      }
+    } catch {
+      setError('Network error: Unable to reach audio transcription service.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSampleVoiceNote = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/ai/parse-audio', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        sessionStorage.setItem('ai_order_draft', JSON.stringify(data));
+        navigate('/ai-capture/confirm');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Text Parsing
+  const handleParseText = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!rawText.trim()) return;
 
@@ -62,15 +176,14 @@ export const AiCapture: React.FC = () => {
 
       if (res.ok) {
         const data: AiParseResponse = await res.json();
-        // Save parsed response to sessionStorage for confirm screen
         sessionStorage.setItem('ai_order_draft', JSON.stringify(data));
         navigate('/ai-capture/confirm');
       } else {
         const data = await res.json();
-        setError(data.error || 'Failed to parse order message');
+        setError(data.error || 'Failed to parse order message.');
       }
     } catch {
-      setError('Network error: Unable to contact AI parser server');
+      setError('Network error: Unable to contact AI parser server.');
     } finally {
       setLoading(false);
     }
@@ -78,15 +191,24 @@ export const AiCapture: React.FC = () => {
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-6 pb-24">
+      {/* Hidden file input */}
+      <input
+        type="file"
+        ref={fileInputRef}
+        onChange={handlePhotoUpload}
+        accept="image/*"
+        className="hidden"
+      />
+
       {/* Header */}
       <div className="mb-6">
         <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-100 text-amber-900 text-xs font-semibold mb-2">
           <Sparkles className="w-3.5 h-3.5 text-amber-600" />
-          <span>Multimodal Order Transcription</span>
+          <span>Multimodal Gemini AI Transcription Engine</span>
         </div>
         <h1 className="text-xl sm:text-2xl font-bold text-slate-900">{t('aiCapture')}</h1>
         <p className="text-xs text-slate-500 mt-1">
-          Turns unstructured WhatsApp texts, Hindi audio notes, and handwritten list photos into verified SKU orders.
+          Transcribes WhatsApp texts, live Hindi voice notes, and photos of handwritten order slips into validated SKU orders.
         </p>
       </div>
 
@@ -97,16 +219,16 @@ export const AiCapture: React.FC = () => {
         </div>
       )}
 
-      {/* Main Input Form */}
+      {/* Main Text Input Form */}
       <div className="bg-white rounded-2xl border border-slate-200 p-5 sm:p-6 shadow-sm">
-        <form onSubmit={handleParse} className="space-y-4">
+        <form onSubmit={handleParseText} className="space-y-4">
           <div>
             <div className="flex justify-between items-center mb-2">
               <label className="text-xs font-bold text-slate-700">Order Message Text (Hindi / Hinglish)</label>
               <button
                 type="button"
                 onClick={handlePasteSample}
-                className="text-xs font-semibold text-emerald-700 hover:text-emerald-800 flex items-center gap-1 bg-emerald-50 px-2 py-1 rounded-lg border border-emerald-200 transition"
+                className="text-xs font-semibold text-emerald-700 hover:text-emerald-800 flex items-center gap-1 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200 transition"
               >
                 <ClipboardPaste className="w-3.5 h-3.5" />
                 <span>{t('sampleOrderBtn')}</span>
@@ -123,25 +245,35 @@ export const AiCapture: React.FC = () => {
             />
           </div>
 
-          {/* Multimodal Alternate Inputs (Voice Note & Photo list) */}
-          <div className="pt-2 flex flex-wrap gap-2.5">
-            <button
-              type="button"
-              onClick={handleSimulateVoice}
-              disabled={isSimulatingAudio}
-              className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-xs font-semibold text-slate-700 transition"
-            >
-              <Mic className={`w-4 h-4 ${isSimulatingAudio ? 'text-rose-500 animate-pulse' : 'text-slate-500'}`} />
-              <span>{isSimulatingAudio ? 'Transcribing Hindi Audio...' : 'Simulate Hindi Voice Note'}</span>
-            </button>
+          {/* Multimodal Actions (Voice Recording & Photo Upload) */}
+          <div className="pt-2 flex flex-wrap items-center gap-2.5">
+            {isRecording ? (
+              <button
+                type="button"
+                onClick={stopRecording}
+                className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition animate-pulse shadow-sm"
+              >
+                <Square className="w-3.5 h-3.5" />
+                <span>Stop Recording ({recordingSeconds}s) - Transcribing...</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={startRecording}
+                className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-xs font-semibold text-slate-700 transition"
+              >
+                <Mic className="w-4 h-4 text-emerald-600" />
+                <span>Record Hindi Voice Note</span>
+              </button>
+            )}
 
             <button
               type="button"
-              onClick={handleSimulatePhoto}
+              onClick={() => fileInputRef.current?.click()}
               className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-xs font-semibold text-slate-700 transition"
             >
-              <Camera className="w-4 h-4 text-slate-500" />
-              <span>Simulate Photo of List</span>
+              <Camera className="w-4 h-4 text-blue-600" />
+              <span>Upload Photo of Handwritten Slip</span>
             </button>
           </div>
 
@@ -159,24 +291,24 @@ export const AiCapture: React.FC = () => {
         </form>
       </div>
 
-      {/* Process Walkthrough Card */}
+      {/* Explanatory Architecture Box */}
       <div className="mt-6 bg-slate-50 rounded-2xl border border-slate-200/80 p-5">
         <h3 className="font-bold text-xs uppercase tracking-wider text-slate-500 mb-3 flex items-center gap-1.5">
           <HelpCircle className="w-3.5 h-3.5 text-slate-400" />
-          <span>How AI Capture Works in Kirana Order</span>
+          <span>Multimodal Pipeline for Company A (Jabalpur)</span>
         </h3>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs text-slate-600">
-          <div className="bg-white p-3.5 rounded-xl border border-slate-200">
-            <div className="font-bold text-slate-900 mb-1">1. Hinglish Extraction</div>
-            Extracts quantities and units (peti vs piece) using local Jabalpur kirana dialect dictionaries.
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 text-xs text-slate-600">
+          <div className="bg-white p-3 rounded-xl border border-slate-200">
+            <div className="font-bold text-slate-900 mb-1">1. Hinglish & Dialect Model</div>
+            Parses local terms like <em>"peti"</em> (cases) vs <em>"khula"</em> (pieces) and applies learned retailer aliases.
           </div>
-          <div className="bg-white p-3.5 rounded-xl border border-slate-200">
-            <div className="font-bold text-slate-900 mb-1">2. Learned Retailer Aliases</div>
-            Checks retailer-specific past corrections before matching general catalog codes.
+          <div className="bg-white p-3 rounded-xl border border-slate-200">
+            <div className="font-bold text-slate-900 mb-1">2. Ambiguity Prevention</div>
+            When units are unclear (e.g. 5 biscuit), asks question—<strong>never guesses</strong>.
           </div>
-          <div className="bg-white p-3.5 rounded-xl border border-slate-200">
+          <div className="bg-white p-3 rounded-xl border border-slate-200">
             <div className="font-bold text-slate-900 mb-1">3. Human-in-the-Loop</div>
-            Never places an order automatically. Asks questions if units are ambiguous or stock is zero.
+            Orders are never committed directly to Tally until human verification on confirm screen.
           </div>
         </div>
       </div>

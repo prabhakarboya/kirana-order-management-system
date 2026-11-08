@@ -11,6 +11,7 @@ import {
   Sparkles,
   ChevronRight,
   Download,
+  AlertTriangle,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { OrderRecord } from '../types';
@@ -57,6 +58,13 @@ export const DeskOrders: React.FC = () => {
           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-200 animate-pulse">
             <Clock className="w-3 h-3 text-amber-600" />
             Review Needed
+          </span>
+        );
+      case 'CREDIT_HOLD':
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-900 border border-amber-300">
+            <AlertTriangle className="w-3 h-3 text-amber-600" />
+            Credit Hold
           </span>
         );
       case 'REJECTED':
@@ -114,7 +122,7 @@ export const DeskOrders: React.FC = () => {
         </div>
 
         <div className="flex gap-2">
-          {['ALL', 'PENDING_DESK_REVIEW', 'APPROVED', 'REJECTED'].map((st) => (
+          {['ALL', 'PENDING_DESK_REVIEW', 'CREDIT_HOLD', 'APPROVED', 'REJECTED'].map((st) => (
             <button
               key={st}
               onClick={() => setStatusFilter(st)}
@@ -128,6 +136,8 @@ export const DeskOrders: React.FC = () => {
                 ? 'All Orders'
                 : st === 'PENDING_DESK_REVIEW'
                 ? 'Pending Desk'
+                : st === 'CREDIT_HOLD'
+                ? 'Credit Hold'
                 : st === 'APPROVED'
                 ? 'Approved'
                 : 'Rejected'}
