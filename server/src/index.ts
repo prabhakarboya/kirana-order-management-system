@@ -12,6 +12,7 @@ import catalogRoutes from './routes/catalog.js';
 import orderRoutes from './routes/orders.js';
 import aiRoutes from './routes/ai.js';
 import deskRoutes from './routes/desk.js';
+import salesmanRoutes from './routes/salesman.js';
 
 dotenv.config();
 
@@ -35,6 +36,7 @@ app.use('/api/catalog', catalogRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/desk', deskRoutes);
+app.use('/api/salesman', salesmanRoutes);
 
 // Health check endpoint
 app.get('/api/health', async (_req, res) => {

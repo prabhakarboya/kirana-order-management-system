@@ -26,11 +26,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const data = await res.json();
         setUser(data.user);
       } else {
-        // Auto-login as default demo retailer for instant seamless reviewer experience!
-        await demoSwitch('RETAILER');
+        setUser(null);
       }
     } catch {
-      // Default fallback
+      setUser(null);
     } finally {
       setLoading(false);
     }

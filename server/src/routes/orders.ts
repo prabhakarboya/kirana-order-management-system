@@ -105,7 +105,15 @@ router.post('/create', requireAuth, async (req: AuthenticatedRequest, res: Respo
   }
 
   const user = req.user!;
-  if (!user.retailer) {
+  let targetRetailerId = user.retailer?.id;
+
+  if (user.role === 'SALESMAN') {
+    const requestedRetailerId = req.body.retailerId;
+    if (!requestedRetailerId) {
+      return res.status(400).json({ error: 'Salesman must specify a target retailerId.' });
+    }
+    targetRetailerId = requestedRetailerId;
+  } else if (!targetRetailerId) {
     return res.status(400).json({ error: 'No linked retailer profile found for current user.' });
   }
 
@@ -136,7 +144,7 @@ router.post('/create', requireAuth, async (req: AuthenticatedRequest, res: Respo
   }
 
   const dbRetailer = await prisma.retailer.findUnique({
-    where: { id: user.retailer.id },
+    where: { id: targetRetailerId },
   });
   if (!dbRetailer) {
     return res.status(404).json({ error: 'Retailer record not found in database.' });
@@ -176,24 +184,42 @@ router.post('/create', requireAuth, async (req: AuthenticatedRequest, res: Respo
     dbRetailer.creditUsed
   );
 
-  // Credit hold rule: if order exceeds credit limit, status is CREDIT_HOLD
-  const orderStatus = summary.creditExceeded ? 'CREDIT_HOLD' : 'PENDING_DESK_REVIEW';
-  const creditApproved = !summary.creditExceeded;
-
-  const orderCount = await prisma.order.count();
-  const orderNumber = `ORD-2026-${String(orderCount + 1).padStart(4, '0')}`;
-
-  // Execute Order Creation & Inventory Deduction in ACID Transaction
+  // Execute Order Creation & Inventory Reservation in ACID Transaction
   try {
     const createdOrder = await prisma.$transaction(async (tx) => {
-      // 1. Create order record
+      // 1. Concurrency-safe order number generation inside transaction
+      const orderCount = await tx.order.count();
+      const randomSuffix = Math.floor(100 + Math.random() * 900);
+      const orderNumber = `ORD-2026-${String(orderCount + 1).padStart(4, '0')}-${randomSuffix}`;
+
+      // 2. Atomically verify current stock inside transaction (protects against concurrent race conditions)
+      for (const { lineRes } of lineCalculations) {
+        const totalCases = lineRes.qtyCases + lineRes.freeCases;
+        const freshSku = await tx.sku.findUnique({ where: { code: lineRes.skuCode } });
+        if (!freshSku || freshSku.stockCases < totalCases) {
+          throw new Error(
+            `Insufficient warehouse stock for ${lineRes.skuCode} during final lock. Available: ${freshSku?.stockCases ?? 0} cases.`
+          );
+        }
+      }
+
+      // 3. Re-verify credit status inside transaction
+      const freshRetailer = await tx.retailer.findUnique({ where: { id: dbRetailer.id } });
+      const currentCreditLimit = freshRetailer?.creditLimit ?? dbRetailer.creditLimit;
+      const currentCreditUsed = freshRetailer?.creditUsed ?? dbRetailer.creditUsed;
+      const creditAvailable = currentCreditLimit - currentCreditUsed;
+      const isCreditExceeded = summary.grandTotal > creditAvailable;
+      const orderStatus = isCreditExceeded ? 'CREDIT_HOLD' : 'PENDING_DESK_REVIEW';
+      const creditApproved = !isCreditExceeded;
+
+      // 4. Create order record
       const ord = await tx.order.create({
         data: {
           orderNumber,
           clientOrderId: clientOrderId || null,
           retailerId: dbRetailer.id,
           status: orderStatus,
-          source,
+          source: user.role === 'SALESMAN' && source === 'APP' ? 'SALESMAN_VISIT' : source,
           rawMessage: rawMessage || null,
           subtotal: summary.subtotal,
           discountTotal: summary.discountTotal,
@@ -220,9 +246,9 @@ router.post('/create', requireAuth, async (req: AuthenticatedRequest, res: Respo
               {
                 userId: user.id,
                 userName: user.name,
-                action: summary.creditExceeded ? 'ORDER_HELD_ON_CREDIT' : 'ORDER_CREATED',
-                details: summary.creditExceeded
-                  ? `Order placed via ${source} for ₹${summary.grandTotal.toFixed(2)}. Credit limit exceeded by ₹${summary.creditShortfall?.toFixed(2)} -> PLACED ON CREDIT HOLD.`
+                action: isCreditExceeded ? 'ORDER_HELD_ON_CREDIT' : 'ORDER_CREATED',
+                details: isCreditExceeded
+                  ? `Order placed via ${source} for ₹${summary.grandTotal.toFixed(2)}. Credit limit exceeded -> PLACED ON CREDIT HOLD.`
                   : `Order placed via ${source} for ₹${summary.grandTotal.toFixed(2)}. Passed credit validation.`,
               },
             ],
@@ -231,7 +257,7 @@ router.post('/create', requireAuth, async (req: AuthenticatedRequest, res: Respo
         include: { lines: { include: { sku: true } } },
       });
 
-      // 2. Atomically deduct inventory
+      // 5. Atomically reserve inventory
       for (const { lineRes } of lineCalculations) {
         const totalPhysicalCases = lineRes.qtyCases + lineRes.freeCases;
         await tx.sku.update({
@@ -240,7 +266,7 @@ router.post('/create', requireAuth, async (req: AuthenticatedRequest, res: Respo
         });
       }
 
-      // 3. Update retailer credit used and last order timestamp
+      // 6. Update retailer credit used and last order timestamp
       await tx.retailer.update({
         where: { id: dbRetailer.id },
         data: {

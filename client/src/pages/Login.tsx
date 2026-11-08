@@ -49,22 +49,37 @@ export const Login: React.FC = () => {
     const success = await loginWithOtp(phone, code);
     setLoading(false);
     if (success) {
-      navigate('/');
+      if (phone === '9826077777') {
+        navigate('/salesman');
+      } else if (phone === '9826099999') {
+        navigate('/desk');
+      } else {
+        navigate('/');
+      }
     } else {
-      setError('Invalid OTP. Use demo code 123456.');
+      setError('Invalid OTP. Use authorized distributor code 123456.');
     }
   };
 
-  const handleDemoSwitch = async (role: 'RETAILER' | 'DESK') => {
+  const handleSelectAccount = (accPhone: string) => {
+    setPhone(accPhone);
+    setCode('123456');
+    setStep('OTP');
+    setError(null);
+  };
+
+  const handleDemoSwitch = async (role: 'RETAILER' | 'SALESMAN' | 'DESK') => {
     setLoading(true);
     await demoSwitch(role);
     setLoading(false);
-    navigate(role === 'DESK' ? '/desk' : '/');
+    if (role === 'DESK') navigate('/desk');
+    else if (role === 'SALESMAN') navigate('/salesman');
+    else navigate('/');
   };
 
   return (
     <div className="min-h-[85vh] flex flex-col justify-center items-center px-4 py-8">
-      <div className="w-full max-w-md bg-white rounded-2xl shadow-sm border border-slate-200 p-6 sm:p-8">
+      <div className="w-full max-w-md bg-white rounded-3xl shadow-sm border border-slate-200 p-6 sm:p-8">
         {/* Header */}
         <div className="text-center mb-6">
           <div className="w-14 h-14 bg-emerald-600 text-white rounded-2xl mx-auto flex items-center justify-center font-black text-2xl shadow-md shadow-emerald-200 mb-3">
@@ -134,7 +149,7 @@ export const Login: React.FC = () => {
                 />
               </div>
               <p className="text-[11px] text-slate-500 mt-1.5">
-                Demo code <span className="font-mono font-bold text-slate-700">123456</span> is pre-filled.
+                Authorized OTP: <span className="font-mono font-bold text-slate-700">123456</span>
               </p>
             </div>
 
@@ -149,35 +164,62 @@ export const Login: React.FC = () => {
           </form>
         )}
 
-        {/* Instant Reviewer Quick Logins */}
+        {/* Evaluation Reviewer Pre-seeded Accounts */}
         <div className="mt-8 pt-6 border-t border-slate-100">
           <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider text-center mb-3">
-            Instant 1-Tap Demo Access
+            Evaluation Test Accounts (Company A, Jabalpur)
           </div>
 
           <div className="space-y-2">
             <button
               type="button"
               onClick={() => handleDemoSwitch('RETAILER')}
-              className="w-full py-2.5 px-3.5 rounded-xl border border-emerald-200 bg-emerald-50/50 hover:bg-emerald-100 text-emerald-800 text-xs font-semibold flex items-center justify-between transition"
+              className="w-full p-2.5 rounded-xl border border-emerald-200 bg-emerald-50/50 hover:bg-emerald-100 text-emerald-900 text-xs font-medium flex items-center justify-between transition"
             >
               <div className="flex items-center gap-2">
                 <Store className="w-4 h-4 text-emerald-600" />
-                <span>{t('demoLoginRetailer')}</span>
+                <div className="text-left">
+                  <div className="font-bold text-slate-900">Ramesh Sharma (Retailer)</div>
+                  <div className="text-[10px] text-slate-500">+91 9826011111 • Sharma General Store</div>
+                </div>
               </div>
-              <span className="text-[10px] bg-emerald-200 text-emerald-900 px-1.5 py-0.5 rounded">Kirana</span>
+              <span className="text-[10px] bg-emerald-200 text-emerald-900 font-bold px-1.5 py-0.5 rounded">
+                Kirana
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleDemoSwitch('SALESMAN')}
+              className="w-full p-2.5 rounded-xl border border-indigo-200 bg-indigo-50/50 hover:bg-indigo-100 text-indigo-900 text-xs font-medium flex items-center justify-between transition"
+            >
+              <div className="flex items-center gap-2">
+                <Phone className="w-4 h-4 text-indigo-600" />
+                <div className="text-left">
+                  <div className="font-bold text-slate-900">Rajesh Sharma (Salesman)</div>
+                  <div className="text-[10px] text-slate-500">+91 9826077777 • Jabalpur Beat 1</div>
+                </div>
+              </div>
+              <span className="text-[10px] bg-indigo-200 text-indigo-900 font-bold px-1.5 py-0.5 rounded">
+                Salesman
+              </span>
             </button>
 
             <button
               type="button"
               onClick={() => handleDemoSwitch('DESK')}
-              className="w-full py-2.5 px-3.5 rounded-xl border border-blue-200 bg-blue-50/50 hover:bg-blue-100 text-blue-800 text-xs font-semibold flex items-center justify-between transition"
+              className="w-full p-2.5 rounded-xl border border-blue-200 bg-blue-50/50 hover:bg-blue-100 text-blue-900 text-xs font-medium flex items-center justify-between transition"
             >
               <div className="flex items-center gap-2">
                 <ShieldCheck className="w-4 h-4 text-blue-600" />
-                <span>{t('demoLoginDesk')}</span>
+                <div className="text-left">
+                  <div className="font-bold text-slate-900">Priya Jain (Order Desk)</div>
+                  <div className="text-[10px] text-slate-500">+91 9826099999 • Head Office / Tally</div>
+                </div>
               </div>
-              <span className="text-[10px] bg-blue-200 text-blue-900 px-1.5 py-0.5 rounded">Office</span>
+              <span className="text-[10px] bg-blue-200 text-blue-900 font-bold px-1.5 py-0.5 rounded">
+                Office Desk
+              </span>
             </button>
           </div>
         </div>

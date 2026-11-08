@@ -4,7 +4,7 @@
 **Public Repository:** `https://github.com/company-a-distributors/kirana-order`  
 **Client:** Company A, Jabalpur, Madhya Pradesh  
 **Annual Turnover:** ₹85–100 Crore | **Kirana Network:** 1,800 retail stores | **Sales Team:** 18 salesmen  
-**Target Solution:** Production-ready Mobile-First PWA, Gemini Multimodal Order Capture, Deterministic Trade Scheme Engine, Pure Native MySQL 8 Relational Persistence, Credit Hold Authorization, and Tally ERP 9 / TallyPrime Exporter.
+**Target Solution:** Production-ready Mobile-First PWA, Gemini Multimodal Order Capture, Deterministic Trade Scheme Engine, Pure Native MySQL 8 Relational Persistence, Credit Hold Authorization, Salesman Beat Offline Visits (IndexedDB), and Tally ERP 9 / TallyPrime Exporter.
 
 ---
 
@@ -35,17 +35,17 @@ $$\text{Total Annual Drain} = \text{₹}31.5\text{L (Returns/Redeliveries)} + \t
 flowchart TD
     subgraph Clients["Frontend Clients"]
         PWA["Kirana Retailer Mobile PWA (React + Vite + Tailwind)"]
-        SALESMAN["Salesman (Offline PWA Queue + Auto-Sync)"]
+        SALESMAN["Salesman Beat Mode (/salesman - IndexedDB Offline Queue)"]
         DESK_UI["Order Desk Web Console (Review & Tally Export)"]
     end
 
-    subgraph ServiceWorker["PWA & Service Worker Layer"]
+    subgraph ServiceWorker["PWA & Offline Storage Layer"]
         SW["Workbox Service Worker (Offline Precaching)"]
-        QUEUE["Offline Order Queue (Idempotent clientOrderId)"]
+        IDB[("Browser Native IndexedDB: KiranaOfflineDB")]
     end
 
     subgraph BackendAPI["Express.js + TypeScript Backend"]
-        AUTH["JWT Auth + Rate-Limited OTP + Role Guard"]
+        AUTH["Pre-Registered Auth + Rate-Limited OTP + Role Guard"]
         AI_ENGINE["Gemini 2.5 Flash Multimodal & Fallback Parser"]
         SCHEME_ENG["Deterministic Trade Scheme Engine"]
         CREDIT_MGR["Credit Limit & Credit Hold Manager"]
@@ -54,7 +54,7 @@ flowchart TD
 
     subgraph Persistence["Pure Native MySQL 8 Database Layer"]
         MYSQL_CONN["mysql2/promise Connection Pool"]
-        DB[("MySQL 8.0 Primary Relational DB (InnoDB)")]
+        DB[("MySQL 8.0 Primary Relational DB (InnoDB with Row Locking)")]
     end
 
     subgraph ERP["Downstream Warehouse"]
@@ -63,7 +63,7 @@ flowchart TD
     end
 
     PWA --> SW --> AUTH
-    SALESMAN --> QUEUE -.->|Auto-sync on reconnect| AUTH
+    SALESMAN --> IDB -.->|Auto-sync on reconnect| AUTH
     DESK_UI --> AUTH
 
     AUTH --> AI_ENGINE
@@ -122,12 +122,12 @@ flowchart TD
 
 ---
 
-## 4. Pure MySQL 8 Relational Schema & Persistence
+## 4. Pure MySQL 8 Relational Schema & Persistence (Zero Prisma, Zero SQLite)
 
-The application uses **pure native MySQL 8 (mysql2/promise)** with a robust connection pool, parameterized queries, and InnoDB ACID transactions. **No ORM layer (No Prisma, No SQLite)** is used.
+The application uses **pure native MySQL 8 (mysql2/promise)** with a robust connection pool, parameterized queries, row-level locking (`SELECT ... FOR UPDATE`), and InnoDB ACID transactions. **No ORM layer (No Prisma, No SQLite)** is used.
 
 ### Core Relational Entities:
-1. **`users`:** User authentication, phone, role (`RETAILER`, `DESK`, `SALESMAN`, `ADMIN`), OTP security fields (`otpCode`, `otpExpiresAt`, `otpAttempts`).
+1. **`users`:** User authentication, phone, role (`RETAILER`, `DESK`, `SALESMAN`, `ADMIN`), rate-limited OTP security fields (`otpCode`, `otpExpiresAt`, `otpAttempts`). Pre-registration validation ensures only active business partners access the system.
 2. **`brands`:** Brands represented by Company A (Parle, HUL, Tata, ITC).
 3. **`categories`:** Product categories (Biscuits, Home Care, Beverages).
 4. **`salesmen`:** Salesmen directory with assigned territory routes (18 salesmen).
@@ -154,17 +154,33 @@ The application uses **pure native MySQL 8 (mysql2/promise)** with a robust conn
 
 The AI engine uses Google Gemini 2.5 Flash to parse informal Hinglish/Hindi orders from multiple input modalities:
 
-1. **Text Messages:** Parses WhatsApp texts with conversational salutations (*bhaiya, peti, khula*).
-2. **Multimodal Vision OCR:** Accepts uploaded images of handwritten kirana paper slips and extracts structured line items using Gemini Vision.
-3. **Voice Notes:** Accepts audio recordings from the browser's Web MediaRecorder API.
-4. **Ambiguity Prevention:** When a unit is unclear (e.g. *"5 biscuit chhota"* without peti or packet), the engine **never guesses**. It sets `detectedUnit = 'unclear'` and prompts the user for clarification.
-5. **Alternative Suggestions:** Always provides two alternative catalog SKUs with confidence scores.
-6. **Self-Learning Alias Loop:** When desk corrects a line, the mapping is saved to `aliases` table, improving subsequent accuracy to 0.99.
-7. **Deterministic Fallback:** If API keys are unset or network fails, a local deterministic parser takes over seamlessly.
+1. **Native Multimodal Hindi Voice Note Transcription:** Browser audio recordings (`audio/webm`) are sent to Gemini 2.5 Flash using raw audio base64 buffers for true speech-to-text and SKU mapping.
+2. **Multimodal Vision OCR:** Accepts uploaded images of handwritten kirana paper slips and extracts structured line items via Gemini Vision.
+3. **Honest Error Handling:** If `GEMINI_API_KEY` is not provided, the API returns a clean HTTP 400 error requiring the key, strictly avoiding simulated or fabricated OCR/audio responses.
+4. **Retailer Past Purchase Context:** The parser queries the retailer's top 10 frequently ordered SKUs, boosting confidence and resolving ambiguous abbreviations based on historical ordering habits.
+5. **Intelligent Alternative SKU Ranking:** Alternative suggestions are dynamically ranked by matching product categories, brands, and positive in-stock status instead of arbitrary catalog slicing.
+6. **Zero-Quantity Token Scanning:** Packaging grammage/specifications (e.g. `250 wala`, `1 kg`, `75g`) are cleanly separated from order counts (`0 peti`, `5 peti`), correctly alerting the user rather than defaulting to 1 case.
+7. **Ambiguity Prevention:** When a unit is unclear (e.g. *"5 biscuit chhota"* without peti or packet), the engine **never guesses**. It sets `detectedUnit = 'unclear'` and prompts the user for clarification.
+8. **Self-Learning Alias Loop:** When desk corrects a line, the mapping is saved to `aliases` table, improving subsequent accuracy to 0.99.
+9. **Deterministic Fallback:** For text orders, if API keys are unset or network fails, a local deterministic NLP parser takes over seamlessly.
 
 ---
 
-## 6. Credit Hold Enforcement & Inventory Safeguards
+## 6. Salesman Beat Mode & Native IndexedDB
+
+1. **Beat Ordering Interface (`/salesman`):** Sales representatives can select from assigned kirana stores on their Jabalpur route, view real-time credit availability, outstanding balances, and customer-specific negotiated prices, and record counter orders.
+2. **Native IndexedDB Storage (`KiranaOfflineDB`):** Replaces volatile `localStorage` with browser native `IndexedDB` (store: `offline_orders`). Orders placed without signal in rural dead zones or concrete godowns are durably stored with unique `clientOrderId` UUIDs.
+3. **Automated Background Sync:** When internet connectivity resumes, the offline queue auto-submits with idempotency deduplication to prevent double-billing.
+4. **Source Attribution:** Orders submitted by salesmen are tagged with `source: 'SALESMAN_VISIT'`.
+
+---
+
+## 7. Credit Hold Enforcement & Inventory Safeguards
+
+### Concurrency-Safe ACID Transactions
+- Order creation executes inside `prisma.$transaction` (our native MySQL 2 transaction connection adapter) with row-level locking (`SELECT stock_cases FROM skus WHERE code = ? FOR UPDATE`).
+- Re-verifies inventory sufficiency and customer credit limits atomically under high concurrency.
+- Order numbers use high-entropy unique sequences (`ORD-2026-XXXX-RAND`) to eliminate serial collisions.
 
 ### Credit Hold Workflow
 - When an order's `grandTotal > availableCredit`, status is automatically set to **`CREDIT_HOLD`**.
@@ -181,17 +197,11 @@ The AI engine uses Google Gemini 2.5 Flash to parse informal Hinglish/Hindi orde
 
 ---
 
-## 7. PWA Offline Salesman Architecture
-
-- **Service Worker:** Powered by Workbox precaching app shell, icons, and fonts.
-- **Runtime Caching:** Caches `/api/catalog` with `StaleWhileRevalidate`.
-- **Offline Order Queue:** Orders placed without network connectivity are stored in browser storage with an idempotency key (`clientOrderId`).
-- **Auto-Sync:** When internet connectivity resumes, the queue auto-submits to `/api/orders/create` with deduplication guarantees.
-
----
-
 ## 8. Verification & Test Report
 
 - **Test Framework:** Vitest v2.1.9, TypeScript 5.7.2, pure MySQL 8.0.43 connection pool.
-- **Total Tests:** 25 tests across 3 suites.
-- **Pass Rate:** **100% (25 Passed, 0 Failed)**.
+- **Total Tests:** 26 tests across 3 suites:
+  - Scheme Engine Suite (12 tests): BOGO batching, slab discounts, GST calculations.
+  - AI Parser Suite (4 tests): WhatsApp text parsing, unit ambiguity guards, desk alias learning, zero-quantity detection.
+  - End-to-End Suite (10 tests): Pure MySQL relational models, credit accounts, salesman assignments, credit hold calculations, and Tally ERP 9 XML / CSV generation.
+- **Pass Rate:** **100% (26 Passed, 0 Failed)**.

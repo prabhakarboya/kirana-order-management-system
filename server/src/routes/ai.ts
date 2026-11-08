@@ -2,7 +2,12 @@ import { Router, Response } from 'express';
 import multer from 'multer';
 import { prisma } from '../db/prisma.js';
 import { AuthenticatedRequest, requireAuth } from '../middleware/auth.js';
-import { parseOrderMessage, parseHandwrittenPhotoOrder } from '../ai/parser.js';
+import {
+  parseOrderMessage,
+  parseHandwrittenPhotoOrder,
+  parseAudioVoiceOrder,
+  RetailerPastOrderSummary,
+} from '../ai/parser.js';
 import { SkuItem } from '../types.js';
 
 const router = Router();
@@ -11,10 +16,11 @@ const upload = multer({
   storage: multer.memoryStorage(),
 });
 
-// Helper: load catalog and aliases from Prisma
+// Helper: load catalog, aliases, and retailer's past purchase history from MySQL
 async function getCatalogAndAliases(retailerId: string | null): Promise<{
   catalog: SkuItem[];
   aliases: Array<{ retailerId?: string | null; phrase: string; skuCode: string }>;
+  pastOrders: RetailerPastOrderSummary[];
 }> {
   const skus = await prisma.sku.findMany({
     where: { isActive: true },
@@ -43,23 +49,49 @@ async function getCatalogAndAliases(retailerId: string | null): Promise<{
     },
   });
 
-  return { catalog, aliases: dbAliases };
+  let pastOrders: RetailerPastOrderSummary[] = [];
+  if (retailerId) {
+    try {
+      const pastRows = await (prisma as any).rawQuery(
+        `SELECT ol.skuCode, s.name, COUNT(*) as frequency, CAST(SUM(ol.qtyCases) AS SIGNED) as totalCases
+         FROM order_lines ol
+         JOIN orders o ON ol.orderId = o.id
+         JOIN skus s ON ol.skuCode = s.code
+         WHERE o.retailerId = ?
+         GROUP BY ol.skuCode, s.name
+         ORDER BY frequency DESC LIMIT 10`,
+        [retailerId]
+      );
+      if (Array.isArray(pastRows)) {
+        pastOrders = pastRows.map((r: any) => ({
+          skuCode: r.skuCode,
+          name: r.name,
+          frequency: Number(r.frequency) || 1,
+          totalCases: Number(r.totalCases) || 0,
+        }));
+      }
+    } catch (e) {
+      console.warn('Could not load retailer past orders:', e);
+    }
+  }
+
+  return { catalog, aliases: dbAliases, pastOrders };
 }
 
-// 1. Text Order Parsing (Hinglish/Hindi WhatsApp texts)
+// 1. Text Order Parsing (Hinglish/Hindi WhatsApp texts with retailer past order context)
 router.post('/parse-order', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
-  const { rawText } = req.body;
+  const { rawText, retailerId: overrideRetailerId } = req.body;
 
   if (!rawText || typeof rawText !== 'string' || !rawText.trim()) {
     return res.status(400).json({ error: 'Text message is required for order capture.' });
   }
 
   const user = req.user!;
-  const retailerId = user.retailer?.id || null;
+  const retailerId = user.retailer?.id || overrideRetailerId || null;
 
   try {
-    const { catalog, aliases } = await getCatalogAndAliases(retailerId);
-    const parseResult = await parseOrderMessage(rawText, catalog, aliases);
+    const { catalog, aliases, pastOrders } = await getCatalogAndAliases(retailerId);
+    const parseResult = await parseOrderMessage(rawText, catalog, aliases, pastOrders);
     return res.json(parseResult);
   } catch (err: any) {
     return res.status(500).json({
@@ -69,57 +101,58 @@ router.post('/parse-order', requireAuth, async (req: AuthenticatedRequest, res: 
   }
 });
 
-// 2. Multimodal Photo OCR (Handwritten paper slips)
+// 2. Multimodal Photo OCR (Handwritten paper slips via Gemini Vision)
 router.post('/parse-photo', requireAuth, upload.single('photo'), async (req: AuthenticatedRequest, res: Response) => {
   const user = req.user!;
   const retailerId = user.retailer?.id || null;
 
+  if (!req.file) {
+    return res.status(400).json({
+      error: 'Photo file is required. Please upload an image of the handwritten slip.',
+    });
+  }
+
   try {
-    const { catalog, aliases } = await getCatalogAndAliases(retailerId);
-
-    if (req.file) {
-      const result = await parseHandwrittenPhotoOrder(
-        req.file.buffer,
-        req.file.mimetype,
-        catalog,
-        aliases
-      );
-      return res.json(result);
-    }
-
-    // If no file uploaded (e.g. simulation demo button clicked)
-    const simulatedResult = await parseOrderMessage(
-      'bhaiya 5 peti biscuit chhota, 2 peti washing powder 1 kilo, chai patti 250 wala 1 peti',
+    const { catalog, aliases, pastOrders } = await getCatalogAndAliases(retailerId);
+    const result = await parseHandwrittenPhotoOrder(
+      req.file.buffer,
+      req.file.mimetype,
       catalog,
-      aliases
+      aliases,
+      pastOrders
     );
-    simulatedResult.rawMessage = '[Photo OCR Slip]: bhaiya 5 peti biscuit chhota, 2 peti washing powder 1 kilo, chai patti 250 wala 1 peti';
-    return res.json(simulatedResult);
+    return res.json(result);
   } catch (err: any) {
-    return res.status(500).json({
-      error: 'Failed to process image capture.',
-      details: err.message,
+    return res.status(400).json({
+      error: err.message || 'Failed to process handwritten photo slip OCR.',
     });
   }
 });
 
-// 3. Audio Voice Note Transcription & Parsing
+// 3. Audio Voice Note Transcription & Parsing (Hindi voice notes via Gemini Audio)
 router.post('/parse-audio', requireAuth, upload.single('audio'), async (req: AuthenticatedRequest, res: Response) => {
   const user = req.user!;
   const retailerId = user.retailer?.id || null;
 
-  try {
-    const { catalog, aliases } = await getCatalogAndAliases(retailerId);
+  if (!req.file) {
+    return res.status(400).json({
+      error: 'Audio file is required. Please record or upload a voice note.',
+    });
+  }
 
-    // Audio transcription (or simulated transcription when testing without microphone)
-    const transcribedText = 'bhaiya 5 peti biscuit chhota, 2 peti washing powder 1 kilo, chai patti 250 wala 1 peti';
-    const result = await parseOrderMessage(transcribedText, catalog, aliases);
-    result.rawMessage = `[Hindi Voice Note Transcription]: ${transcribedText}`;
+  try {
+    const { catalog, aliases, pastOrders } = await getCatalogAndAliases(retailerId);
+    const result = await parseAudioVoiceOrder(
+      req.file.buffer,
+      req.file.mimetype || 'audio/webm',
+      catalog,
+      aliases,
+      pastOrders
+    );
     return res.json(result);
   } catch (err: any) {
-    return res.status(500).json({
-      error: 'Failed to process voice note.',
-      details: err.message,
+    return res.status(400).json({
+      error: err.message || 'Failed to transcribe audio voice note.',
     });
   }
 });

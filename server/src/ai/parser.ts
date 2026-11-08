@@ -38,6 +38,13 @@ export interface RetailerAlias {
   skuCode: string;
 }
 
+export interface RetailerPastOrderSummary {
+  skuCode: string;
+  name: string;
+  frequency: number;
+  totalCases?: number;
+}
+
 const HINDI_NUMERAL_MAP: Record<string, number> = {
   shunya: 0,
   zero: 0,
@@ -161,7 +168,8 @@ function extractQtyAndUnit(phrase: string): {
 export function parseOrderTextFallback(
   rawText: string,
   catalog: SkuItem[],
-  aliases: RetailerAlias[] = []
+  aliases: RetailerAlias[] = [],
+  pastOrders: RetailerPastOrderSummary[] = []
 ): AiParseResponse {
   const segments = rawText
     .split(/[,;\n+]|\baur\b|\band\b/i)
@@ -203,9 +211,29 @@ export function parseOrderTextFallback(
       }
     }
 
-    // 2 Alternative SKUs
+    // 3. Retailer's past order preference boosting: If retailer frequently buys this SKU, boost confidence
+    if (matchedSku && pastOrders.length > 0) {
+      const pastMatch = pastOrders.find((p) => p.skuCode === matchedSku?.code);
+      if (pastMatch) {
+        confidence = Math.min(0.99, confidence + 0.03);
+      }
+    }
+
+    // 4. Intelligent Alternative SKUs: Rank by same category or brand first, then stock availability
     const alternatives = catalog
       .filter((s) => s.code !== matchedSku?.code)
+      .sort((a, b) => {
+        if (matchedSku) {
+          const aSameCat = a.category === matchedSku.category ? 1 : 0;
+          const bSameCat = b.category === matchedSku.category ? 1 : 0;
+          if (aSameCat !== bSameCat) return bSameCat - aSameCat;
+
+          const aSameBrand = a.brand === matchedSku.brand ? 1 : 0;
+          const bSameBrand = b.brand === matchedSku.brand ? 1 : 0;
+          if (aSameBrand !== bSameBrand) return bSameBrand - aSameBrand;
+        }
+        return b.stockCases - a.stockCases;
+      })
       .slice(0, 2)
       .map((s, idx) => ({
         skuCode: s.code,
@@ -284,7 +312,8 @@ async function callGeminiAiParser(
   rawText: string,
   catalog: SkuItem[],
   aliases: RetailerAlias[],
-  apiKey: string
+  apiKey: string,
+  pastOrders: RetailerPastOrderSummary[] = []
 ): Promise<AiParseResponse> {
   const ai = new GoogleGenAI({ apiKey });
 
@@ -306,13 +335,16 @@ ${JSON.stringify(catalogSummary, null, 2)}
 Retailer-Specific Learned Aliases:
 ${JSON.stringify(aliases, null, 2)}
 
+Retailer Past Order History (frequently ordered SKUs):
+${JSON.stringify(pastOrders, null, 2)}
+
 Rules:
 1. Detect each item segment.
 2. Extract requested quantity and unit ('case', 'piece', or 'unclear').
    - Words like 'peti', 'carton', 'box', 'case' mean 'case'.
    - Words like 'packet', 'piece', 'khula', 'pcs', 'pouch' mean 'piece'.
    - If unit is not explicitly stated (e.g. "5 biscuit chhota"), set detectedUnit to "unclear" and populate clarificationQuestion. NEVER GUESS!
-3. Match to the most accurate SKU code from the catalog or learned aliases.
+3. Match to the most accurate SKU code from the catalog or learned aliases. Use past order history to resolve shorthand.
 4. Provide exactly 2 alternative SKU codes from the catalog with lower confidence.
 5. If the matched SKU has 0 stockCases, set stockStatus to "OUT_OF_STOCK" and include a warning.
 6. Return a valid JSON object matching this structure:
@@ -371,20 +403,21 @@ Rules:
 export async function parseOrderMessage(
   rawText: string,
   catalog: SkuItem[],
-  aliases: RetailerAlias[] = []
+  aliases: RetailerAlias[] = [],
+  pastOrders: RetailerPastOrderSummary[] = []
 ): Promise<AiParseResponse> {
   const apiKey = process.env.GEMINI_API_KEY || process.env.LLM_API_KEY;
 
   if (apiKey && apiKey !== 'demo-gemini-key' && apiKey.length > 15) {
     try {
-      return await callGeminiAiParser(rawText, catalog, aliases, apiKey);
+      return await callGeminiAiParser(rawText, catalog, aliases, apiKey, pastOrders);
     } catch (err: any) {
       console.warn('Gemini API call failed, falling back to deterministic parser:', err.message);
     }
   }
 
   // Resilient deterministic fallback
-  return parseOrderTextFallback(rawText, catalog, aliases);
+  return parseOrderTextFallback(rawText, catalog, aliases, pastOrders);
 }
 
 /**
@@ -394,57 +427,117 @@ export async function parseHandwrittenPhotoOrder(
   imageBuffer: Buffer,
   mimeType: string,
   catalog: SkuItem[],
-  aliases: RetailerAlias[] = []
+  aliases: RetailerAlias[] = [],
+  pastOrders: RetailerPastOrderSummary[] = []
 ): Promise<AiParseResponse> {
   const apiKey = process.env.GEMINI_API_KEY || process.env.LLM_API_KEY;
 
-  if (apiKey && apiKey !== 'demo-gemini-key' && apiKey.length > 15) {
-    try {
-      const ai = new GoogleGenAI({ apiKey });
-      const catalogSummary = catalog.map((s) => ({
-        code: s.code,
-        name: s.name,
-        unitLabel: s.unitLabel,
-        stockCases: s.stockCases,
-      }));
-
-      const base64Data = imageBuffer.toString('base64');
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: [
-          {
-            role: 'user',
-            parts: [
-              {
-                inlineData: {
-                  mimeType,
-                  data: base64Data,
-                },
-              },
-              {
-                text: `You are an AI OCR and order extractor for FMCG kirana distribution in Jabalpur.
-Transcribe the handwritten text from this paper order slip, extract the SKUs and quantities, and map them to our catalog:
-${JSON.stringify(catalogSummary, null, 2)}
-Return the response as valid JSON matching AiParseResponseSchema.`,
-              },
-            ],
-          },
-        ],
-        config: {
-          responseMimeType: 'application/json',
-        },
-      });
-
-      const responseText = response.text?.trim() || '';
-      return AiParseResponseSchema.parse(JSON.parse(responseText));
-    } catch (err: any) {
-      console.warn('Gemini Vision OCR call failed, falling back to sample OCR extraction:', err.message);
-    }
+  if (!apiKey || apiKey === 'demo-gemini-key' || apiKey.length <= 15) {
+    throw new Error(
+      'Handwritten slip photo OCR requires a configured GEMINI_API_KEY. Please provide your Gemini API key in server/.env, or type/paste the order text directly.'
+    );
   }
 
-  // Fallback for demo when no key is set
-  const simulatedOcrText = '5 peti biscuit chhota, 2 peti washing powder 1 kilo, chai patti 250 wala 1 peti';
-  const result = parseOrderTextFallback(simulatedOcrText, catalog, aliases);
-  result.rawMessage = `[OCR from Handwritten Slip]: ${simulatedOcrText}`;
-  return result;
+  const ai = new GoogleGenAI({ apiKey });
+  const catalogSummary = catalog.map((s) => ({
+    code: s.code,
+    name: s.name,
+    unitLabel: s.unitLabel,
+    stockCases: s.stockCases,
+  }));
+
+  const base64Data = imageBuffer.toString('base64');
+  const response = await ai.models.generateContent({
+    model: 'gemini-2.5-flash',
+    contents: [
+      {
+        role: 'user',
+        parts: [
+          {
+            inlineData: {
+              mimeType,
+              data: base64Data,
+            },
+          },
+          {
+            text: `You are an AI OCR and order extractor for FMCG kirana distribution in Jabalpur.
+Transcribe the handwritten text from this paper order slip, extract the SKUs and quantities, and map them to our catalog:
+${JSON.stringify(catalogSummary, null, 2)}
+Retailer Past Order History:
+${JSON.stringify(pastOrders, null, 2)}
+Return the response as valid JSON matching AiParseResponseSchema.`,
+          },
+        ],
+      },
+    ],
+    config: {
+      responseMimeType: 'application/json',
+    },
+  });
+
+  const responseText = response.text?.trim() || '';
+  return AiParseResponseSchema.parse(JSON.parse(responseText));
+}
+
+/**
+ * Multimodal Gemini Audio parser for Hindi voice notes.
+ */
+export async function parseAudioVoiceOrder(
+  audioBuffer: Buffer,
+  mimeType: string,
+  catalog: SkuItem[],
+  aliases: RetailerAlias[] = [],
+  pastOrders: RetailerPastOrderSummary[] = []
+): Promise<AiParseResponse> {
+  const apiKey = process.env.GEMINI_API_KEY || process.env.LLM_API_KEY;
+
+  if (!apiKey || apiKey === 'demo-gemini-key' || apiKey.length <= 15) {
+    throw new Error(
+      'Hindi audio voice note transcription requires a configured GEMINI_API_KEY. Please provide your Gemini API key in server/.env to transcribe live audio recordings, or enter the order text directly.'
+    );
+  }
+
+  const ai = new GoogleGenAI({ apiKey });
+  const catalogSummary = catalog.map((s) => ({
+    code: s.code,
+    name: s.name,
+    unitLabel: s.unitLabel,
+    piecesPerCase: s.piecesPerCase,
+    stockCases: s.stockCases,
+  }));
+
+  const base64Data = audioBuffer.toString('base64');
+  const response = await ai.models.generateContent({
+    model: 'gemini-2.5-flash',
+    contents: [
+      {
+        role: 'user',
+        parts: [
+          {
+            inlineData: {
+              mimeType,
+              data: base64Data,
+            },
+          },
+          {
+            text: `You are an AI order transcription engine for Company A, an FMCG distributor in Jabalpur, MP, India.
+Listen to this Hindi/Hinglish audio voice note from a kirana shopkeeper.
+1. Transcribe the spoken words verbatim into Hinglish.
+2. Extract each requested item, quantity, and unit ('case' or 'piece'). If unit is unclear, populate clarificationQuestion. NEVER GUESS!
+3. Map items to our catalog:
+${JSON.stringify(catalogSummary, null, 2)}
+Retailer Past Order History:
+${JSON.stringify(pastOrders, null, 2)}
+Return valid JSON matching AiParseResponseSchema.`,
+          },
+        ],
+      },
+    ],
+    config: {
+      responseMimeType: 'application/json',
+    },
+  });
+
+  const responseText = response.text?.trim() || '';
+  return AiParseResponseSchema.parse(JSON.parse(responseText));
 }

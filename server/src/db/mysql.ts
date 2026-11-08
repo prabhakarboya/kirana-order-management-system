@@ -133,9 +133,13 @@ export const db = {
       }
       if (!rows.length) return null;
       const user = rows[0];
-      if (args.include?.retailer) {
+      if (args.include?.retailer || user.role === 'RETAILER') {
         const [retRows] = await pool.query('SELECT * FROM retailers WHERE userId = ? LIMIT 1', [user.id]);
         user.retailer = (retRows as any[])[0] || null;
+      }
+      if (args.include?.salesman || user.role === 'SALESMAN') {
+        const [salRows] = await pool.query('SELECT * FROM salesmen WHERE userId = ? LIMIT 1', [user.id]);
+        user.salesman = (salRows as any[])[0] || null;
       }
       return user;
     },
@@ -144,9 +148,13 @@ export const db = {
       const list = rows as any[];
       if (!list.length) return null;
       const user = list[0];
-      if (args.include?.retailer) {
+      if (args.include?.retailer || user.role === 'RETAILER') {
         const [retRows] = await pool.query('SELECT * FROM retailers WHERE userId = ? LIMIT 1', [user.id]);
         user.retailer = (retRows as any[])[0] || null;
+      }
+      if (args.include?.salesman || user.role === 'SALESMAN') {
+        const [salRows] = await pool.query('SELECT * FROM salesmen WHERE userId = ? LIMIT 1', [user.id]);
+        user.salesman = (salRows as any[])[0] || null;
       }
       return user;
     },
@@ -593,6 +601,17 @@ export const db = {
   },
 
   salesman: {
+    async findUnique(args: { where: { id?: string; userId?: string } }): Promise<any> {
+      let rows: any[] = [];
+      if (args.where.id) {
+        const [r] = await pool.query('SELECT * FROM salesmen WHERE id = ? LIMIT 1', [args.where.id]);
+        rows = r as any[];
+      } else if (args.where.userId) {
+        const [r] = await pool.query('SELECT * FROM salesmen WHERE userId = ? LIMIT 1', [args.where.userId]);
+        rows = r as any[];
+      }
+      return rows[0] || null;
+    },
     async findMany(): Promise<any[]> {
       const [rows] = await pool.query('SELECT * FROM salesmen');
       return rows as any[];
@@ -837,6 +856,10 @@ function createTxAdapter(conn: PoolConnection) {
     rawQuery: (sql: string, params: any[] = []) => conn.query(sql, params).then(([rows]) => rows),
     rawExecute: (sql: string, params: any[] = []) => conn.execute(sql, params).then(([res]) => res),
     order: {
+      count: async (): Promise<number> => {
+        const [rows] = await conn.query('SELECT COUNT(*) as cnt FROM orders');
+        return Number((rows as any[])[0]?.cnt || 0);
+      },
       create: (args: { data: any }) => executeOrderCreation(conn, args.data),
       update: async (args: { where: { id: string }; data: any; include?: any }) => {
         if (args.data.auditLogs?.create) {
@@ -873,6 +896,10 @@ function createTxAdapter(conn: PoolConnection) {
       },
     },
     retailer: {
+      findUnique: async (args: { where: { id: string } }) => {
+        const [rows] = await conn.query('SELECT * FROM retailers WHERE id = ? FOR UPDATE', [args.where.id]);
+        return (rows as any[])[0] || null;
+      },
       update: async (args: { where: { id: string }; data: any }) => {
         const { sets, values } = buildUpdateSetClause(args.data);
         if (sets.length > 0) {
@@ -884,6 +911,10 @@ function createTxAdapter(conn: PoolConnection) {
       },
     },
     sku: {
+      findUnique: async (args: { where: { code: string } }) => {
+        const [rows] = await conn.query('SELECT * FROM skus WHERE code = ? FOR UPDATE', [args.where.code]);
+        return (rows as any[])[0] || null;
+      },
       update: async (args: { where: { code: string }; data: any }) => {
         const { sets, values } = buildUpdateSetClause(args.data);
         if (sets.length > 0) {

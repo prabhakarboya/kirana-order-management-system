@@ -13,6 +13,12 @@ export interface AuthenticatedUser {
     creditLimit: number;
     creditUsed: number;
   } | null;
+  salesman?: {
+    id: string;
+    name: string;
+    phone: string;
+    territory: string;
+  } | null;
 }
 
 export interface AuthenticatedRequest extends Request {

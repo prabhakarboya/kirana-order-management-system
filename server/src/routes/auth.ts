@@ -32,42 +32,23 @@ router.post('/send-otp', otpRateLimiter, async (req: Request, res: Response) => 
 
   const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes validity
 
-  let user = await prisma.user.findUnique({ where: { phone } });
+  const user = await prisma.user.findUnique({ where: { phone } });
 
   if (!user) {
-    // Self-registration for new Kirana merchant
-    user = await prisma.user.create({
-      data: {
-        phone,
-        name: `Kirana Store ${phone.slice(-4)}`,
-        role: 'RETAILER',
-        otpCode: generatedCode,
-        otpExpiresAt: expiresAt,
-        otpAttempts: 0,
-        retailer: {
-          create: {
-            shopName: `New Kirana Store (${phone.slice(-4)})`,
-            ownerName: `Retailer ${phone.slice(-4)}`,
-            phone,
-            address: 'Jabalpur, Madhya Pradesh',
-            creditLimit: 50000.0,
-            creditUsed: 0.0,
-            salesmanName: 'Rajesh Sharma',
-          },
-        },
-      },
-    });
-  } else {
-    // Update existing user OTP
-    user = await prisma.user.update({
-      where: { id: user.id },
-      data: {
-        otpCode: generatedCode,
-        otpExpiresAt: expiresAt,
-        otpAttempts: 0,
-      },
+    return res.status(404).json({
+      error: `Mobile number +91 ${phone} is not registered in Company A distributor records. Please contact the order desk at Jabalpur HQ to register your kirana shop.`,
     });
   }
+
+  // Update existing user OTP
+  await prisma.user.update({
+    where: { id: user.id },
+    data: {
+      otpCode: generatedCode,
+      otpExpiresAt: expiresAt,
+      otpAttempts: 0,
+    },
+  });
 
   return res.json({
     success: true,
@@ -147,20 +128,25 @@ router.post('/verify-otp', async (req: Request, res: Response) => {
   });
 });
 
-// Instant Demo Role Switcher (Retailer vs Order Desk)
+// Instant Evaluation Role Switcher (Retailer, Salesman, Desk)
 router.post('/demo-switch', async (req: Request, res: Response) => {
-  const { role } = req.body; // 'RETAILER' or 'DESK'
+  const { role } = req.body; // 'RETAILER' | 'SALESMAN' | 'DESK'
 
   let targetUser;
   if (role === 'DESK') {
     targetUser = await prisma.user.findFirst({
       where: { role: 'DESK' },
-      include: { retailer: true },
+      include: { retailer: true, salesman: true },
+    });
+  } else if (role === 'SALESMAN') {
+    targetUser = await prisma.user.findFirst({
+      where: { role: 'SALESMAN' },
+      include: { retailer: true, salesman: true },
     });
   } else {
     targetUser = await prisma.user.findUnique({
       where: { id: 'USR-RET-1' },
-      include: { retailer: true },
+      include: { retailer: true, salesman: true },
     });
   }
 
@@ -186,6 +172,7 @@ router.post('/demo-switch', async (req: Request, res: Response) => {
       name: targetUser.name,
       role: targetUser.role,
       retailer: targetUser.retailer,
+      salesman: targetUser.salesman,
     },
   });
 });

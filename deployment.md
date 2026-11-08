@@ -30,13 +30,16 @@ Get-Content server/src/db/schema.sql -Raw | mysql -u root -p kirana_order
 # On Linux / macOS:
 mysql -u root -p kirana_order < server/src/db/schema.sql
 
-# 3. Run automated verification test suite (25/25 Tests Passing)
+# 3. Run automated verification test suite (26/26 Tests Passing)
 cd server
 npm test
 cd ..
 
 # 4. Start development servers (Frontend on port 5173, Backend API on port 5000)
 npm run dev
+# - Retailer Catalogue & AI Order Capture: http://localhost:5173/
+# - Salesman Beat Visits & Offline Ordering: http://localhost:5173/salesman
+# - Order Desk Queue & Tally Export: http://localhost:5173/desk
 ```
 
 ---

@@ -14,6 +14,7 @@ import { OrderHistory } from './pages/OrderHistory';
 import { DeskOrders } from './pages/DeskOrders';
 import { DeskOrderDetail } from './pages/DeskOrderDetail';
 import { DeskDashboard } from './pages/DeskDashboard';
+import { SalesmanMode } from './pages/SalesmanMode';
 
 const AppRoutes: React.FC = () => {
   const { user, loading } = useAuth();
@@ -41,6 +42,9 @@ const AppRoutes: React.FC = () => {
           <Route path="/ai-capture" element={<AiCapture />} />
           <Route path="/ai-capture/confirm" element={<ConfirmAiOrder />} />
           <Route path="/orders" element={<OrderHistory />} />
+
+          {/* Salesman Field Visits */}
+          <Route path="/salesman" element={<SalesmanMode />} />
 
           {/* Desk Routes */}
           <Route path="/desk" element={<DeskOrders />} />

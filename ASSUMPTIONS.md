@@ -56,8 +56,8 @@
 ## 5. Warehouse Inventory & Stock-Out Guards
 - Orders cannot be placed for SKUs having `0` warehouse stock cases (e.g., Tea leaf 250 g).
 - In AI Order Capture (WhatsApp text, handwritten slip photo, or voice note), out-of-stock SKUs are flagged with a prominent warning banner and excluded from draft orders to prevent delivery commitments that cannot be fulfilled.
-- **Stock Deducted Flag (`stockDeducted`):**  
-  Warehouse stock deduction occurs strictly upon Order Desk approval. If an approved order is subsequently rejected or revised, stock is restored idempotently using the boolean guard.
+- **Two-Phase Inventory Reservation Architecture (`stockDeducted`):**  
+  To prevent stock overselling between multiple concurrent retailers and field salesmen, inventory is atomically reserved upon order placement inside an ACID transaction with row-level locks (`stockCases = stockCases - ?`). If an order is subsequently rejected or revised by the Order Desk, the reserved inventory is restored idempotently using the boolean guard.
 
 ---
 
@@ -74,13 +74,14 @@
 
 ---
 
-## 8. Offline Field Sales Sync & Idempotency
-- When salesmen visit kirana stores in low-connectivity areas around Jabalpur, orders are queued locally in browser IndexedDB/LocalStorage.
+## 8. Offline Field Sales Sync & Native IndexedDB
+- When salesmen visit kirana stores in low-connectivity areas around Jabalpur, orders are queued locally in browser **`IndexedDB`** (`KiranaOfflineDB`) with localStorage fallback.
 - Every offline order generates a client-side UUIDv4 (`clientOrderId`).
 - Upon reconnection, background sync submits queued orders. The server enforces a **unique database constraint on `clientOrderId`**, preventing double-billing on network timeouts.
 
 ---
 
-## 9. Multimodal AI Processing Fallback
-- Gemini 2.5 Flash is utilized for natural language order understanding, handwritten receipt OCR, and Hindi voice transcripts.
-- If the Gemini API key is not configured or an external network failure occurs, the server transparently falls back to a deterministic, rule-based Hinglish regex parser with zero downtime.
+## 9. Multimodal AI Processing & Honest Error Boundaries
+- **WhatsApp Text Parsing:** Powered by Gemini 2.5 Flash with prompt engineering incorporating the retailer's past purchase history. If `GEMINI_API_KEY` is not configured, the system transparently falls back to a deterministic rule-based Hinglish parser.
+- **Handwritten Slip OCR & Audio Voice Notes:** Multimodal Vision and Audio capabilities natively utilize Gemini 2.5 Flash. If `GEMINI_API_KEY` is unconfigured, the system returns an honest notification requiring the API key or text input, avoiding fabricated or simulated outputs.
+- **Illustrative Data Disclosures:** The 4 distributor brand names (Parle, HUL, Tata, ITC) and specific GST rates are illustrative assumptions matching standard FMCG distributor operations in Madhya Pradesh.
