@@ -67,6 +67,30 @@ function generateId(): string {
   return 'id-' + Date.now().toString(36) + '-' + Math.random().toString(36).substring(2, 9);
 }
 
+// Helper to construct dynamic SQL update clauses supporting atomic { increment: X } and { decrement: X }
+function buildUpdateSetClause(data: any): { sets: string[]; values: any[] } {
+  const sets: string[] = [];
+  const values: any[] = [];
+  for (const [k, v] of Object.entries(data)) {
+    if (k === 'auditLogs' || k === 'lines') continue;
+    if (v !== null && typeof v === 'object' && !Array.isArray(v) && !(v instanceof Date)) {
+      if ('increment' in v && typeof (v as any).increment === 'number') {
+        sets.push(`${k} = ${k} + ?`);
+        values.push((v as any).increment);
+        continue;
+      }
+      if ('decrement' in v && typeof (v as any).decrement === 'number') {
+        sets.push(`${k} = ${k} - ?`);
+        values.push((v as any).decrement);
+        continue;
+      }
+    }
+    sets.push(`${k} = ?`);
+    values.push(v);
+  }
+  return { sets, values };
+}
+
 // -------------------------------------------------------------
 // Pure MySQL Relational Repositories
 // -------------------------------------------------------------
@@ -138,14 +162,11 @@ export const db = {
       return (rows as any[])[0];
     },
     async update(args: { where: { id: string }; data: any }): Promise<any> {
-      const sets: string[] = [];
-      const values: any[] = [];
-      for (const [k, v] of Object.entries(args.data)) {
-        sets.push(`${k} = ?`);
-        values.push(v);
+      const { sets, values } = buildUpdateSetClause(args.data);
+      if (sets.length > 0) {
+        values.push(args.where.id);
+        await pool.execute(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`, values);
       }
-      values.push(args.where.id);
-      await pool.execute(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`, values);
       const [rows] = await pool.query('SELECT * FROM users WHERE id = ?', [args.where.id]);
       return (rows as any[])[0];
     },
@@ -200,14 +221,11 @@ export const db = {
       return (rows as any[])[0];
     },
     async update(args: { where: { id: string }; data: any }): Promise<any> {
-      const sets: string[] = [];
-      const values: any[] = [];
-      for (const [k, v] of Object.entries(args.data)) {
-        sets.push(`${k} = ?`);
-        values.push(v);
+      const { sets, values } = buildUpdateSetClause(args.data);
+      if (sets.length > 0) {
+        values.push(args.where.id);
+        await pool.execute(`UPDATE retailers SET ${sets.join(', ')} WHERE id = ?`, values);
       }
-      values.push(args.where.id);
-      await pool.execute(`UPDATE retailers SET ${sets.join(', ')} WHERE id = ?`, values);
       const [rows] = await pool.query('SELECT * FROM retailers WHERE id = ?', [args.where.id]);
       return (rows as any[])[0];
     },
@@ -265,14 +283,11 @@ export const db = {
       return (rows as any[])[0];
     },
     async update(args: { where: { code: string }; data: any }): Promise<any> {
-      const sets: string[] = [];
-      const values: any[] = [];
-      for (const [k, v] of Object.entries(args.data)) {
-        sets.push(`${k} = ?`);
-        values.push(v);
+      const { sets, values } = buildUpdateSetClause(args.data);
+      if (sets.length > 0) {
+        values.push(args.where.code);
+        await pool.execute(`UPDATE skus SET ${sets.join(', ')} WHERE code = ?`, values);
       }
-      values.push(args.where.code);
-      await pool.execute(`UPDATE skus SET ${sets.join(', ')} WHERE code = ?`, values);
       const [rows] = await pool.query('SELECT * FROM skus WHERE code = ?', [args.where.code]);
       return (rows as any[])[0];
     },
@@ -382,22 +397,16 @@ export const db = {
       return executeOrderCreation(pool, args.data);
     },
     async update(args: { where: { id: string }; data: any; include?: any }): Promise<any> {
-      const sets: string[] = [];
-      const values: any[] = [];
-      for (const [k, v] of Object.entries(args.data)) {
-        if (k === 'auditLogs' && (v as any)?.create) {
-          for (const log of (v as any).create) {
-            await pool.execute(
-              `INSERT INTO audit_logs (id, orderId, userId, userName, action, details, timestamp)
-               VALUES (?, ?, ?, ?, ?, ?, NOW(3))`,
-              [generateId(), args.where.id, log.userId || null, log.userName, log.action, log.details || null]
-            );
-          }
-          continue;
+      if (args.data.auditLogs?.create) {
+        for (const log of args.data.auditLogs.create) {
+          await pool.execute(
+            `INSERT INTO audit_logs (id, orderId, userId, userName, action, details, timestamp)
+             VALUES (?, ?, ?, ?, ?, ?, NOW(3))`,
+            [generateId(), args.where.id, log.userId || null, log.userName, log.action, log.details || null]
+          );
         }
-        sets.push(`${k} = ?`);
-        values.push(v);
       }
+      const { sets, values } = buildUpdateSetClause(args.data);
       if (sets.length > 0) {
         values.push(args.where.id);
         await pool.execute(`UPDATE orders SET ${sets.join(', ')} WHERE id = ?`, values);
@@ -505,14 +514,11 @@ export const db = {
       return { count: args.data.length };
     },
     async update(args: { where: { id: string }; data: any }): Promise<any> {
-      const sets: string[] = [];
-      const values: any[] = [];
-      for (const [k, v] of Object.entries(args.data)) {
-        sets.push(`${k} = ?`);
-        values.push(v);
+      const { sets, values } = buildUpdateSetClause(args.data);
+      if (sets.length > 0) {
+        values.push(args.where.id);
+        await pool.execute(`UPDATE aliases SET ${sets.join(', ')} WHERE id = ?`, values);
       }
-      values.push(args.where.id);
-      await pool.execute(`UPDATE aliases SET ${sets.join(', ')} WHERE id = ?`, values);
       const [rows] = await pool.query('SELECT * FROM aliases WHERE id = ?', [args.where.id]);
       return (rows as any[])[0];
     },
@@ -833,22 +839,16 @@ function createTxAdapter(conn: PoolConnection) {
     order: {
       create: (args: { data: any }) => executeOrderCreation(conn, args.data),
       update: async (args: { where: { id: string }; data: any; include?: any }) => {
-        const sets: string[] = [];
-        const values: any[] = [];
-        for (const [k, v] of Object.entries(args.data)) {
-          if (k === 'auditLogs' && (v as any)?.create) {
-            for (const log of (v as any).create) {
-              await conn.execute(
-                `INSERT INTO audit_logs (id, orderId, userId, userName, action, details, timestamp)
-                 VALUES (?, ?, ?, ?, ?, ?, NOW(3))`,
-                [generateId(), args.where.id, log.userId || null, log.userName, log.action, log.details || null]
-              );
-            }
-            continue;
+        if (args.data.auditLogs?.create) {
+          for (const log of args.data.auditLogs.create) {
+            await conn.execute(
+              `INSERT INTO audit_logs (id, orderId, userId, userName, action, details, timestamp)
+               VALUES (?, ?, ?, ?, ?, ?, NOW(3))`,
+              [generateId(), args.where.id, log.userId || null, log.userName, log.action, log.details || null]
+            );
           }
-          sets.push(`${k} = ?`);
-          values.push(v);
         }
+        const { sets, values } = buildUpdateSetClause(args.data);
         if (sets.length > 0) {
           values.push(args.where.id);
           await conn.execute(`UPDATE orders SET ${sets.join(', ')} WHERE id = ?`, values);
@@ -874,28 +874,22 @@ function createTxAdapter(conn: PoolConnection) {
     },
     retailer: {
       update: async (args: { where: { id: string }; data: any }) => {
-        const sets: string[] = [];
-        const values: any[] = [];
-        for (const [k, v] of Object.entries(args.data)) {
-          sets.push(`${k} = ?`);
-          values.push(v);
+        const { sets, values } = buildUpdateSetClause(args.data);
+        if (sets.length > 0) {
+          values.push(args.where.id);
+          await conn.execute(`UPDATE retailers SET ${sets.join(', ')} WHERE id = ?`, values);
         }
-        values.push(args.where.id);
-        await conn.execute(`UPDATE retailers SET ${sets.join(', ')} WHERE id = ?`, values);
         const [rows] = await conn.query('SELECT * FROM retailers WHERE id = ?', [args.where.id]);
         return (rows as any[])[0];
       },
     },
     sku: {
       update: async (args: { where: { code: string }; data: any }) => {
-        const sets: string[] = [];
-        const values: any[] = [];
-        for (const [k, v] of Object.entries(args.data)) {
-          sets.push(`${k} = ?`);
-          values.push(v);
+        const { sets, values } = buildUpdateSetClause(args.data);
+        if (sets.length > 0) {
+          values.push(args.where.code);
+          await conn.execute(`UPDATE skus SET ${sets.join(', ')} WHERE code = ?`, values);
         }
-        values.push(args.where.code);
-        await conn.execute(`UPDATE skus SET ${sets.join(', ')} WHERE code = ?`, values);
         const [rows] = await conn.query('SELECT * FROM skus WHERE code = ?', [args.where.code]);
         return (rows as any[])[0];
       },
@@ -925,14 +919,11 @@ function createTxAdapter(conn: PoolConnection) {
         return rows[0] || null;
       },
       update: async (args: { where: { id: string }; data: any }) => {
-        const sets: string[] = [];
-        const values: any[] = [];
-        for (const [k, v] of Object.entries(args.data)) {
-          sets.push(`${k} = ?`);
-          values.push(v);
+        const { sets, values } = buildUpdateSetClause(args.data);
+        if (sets.length > 0) {
+          values.push(args.where.id);
+          await conn.execute(`UPDATE aliases SET ${sets.join(', ')} WHERE id = ?`, values);
         }
-        values.push(args.where.id);
-        await conn.execute(`UPDATE aliases SET ${sets.join(', ')} WHERE id = ?`, values);
         const [rows] = await conn.query('SELECT * FROM aliases WHERE id = ?', [args.where.id]);
         return (rows as any[])[0];
       },
