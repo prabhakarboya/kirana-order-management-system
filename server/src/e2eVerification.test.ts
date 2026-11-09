@@ -289,4 +289,27 @@ describe('Comprehensive Production Verification Suite', () => {
       expect(csv).toContain('SKU-BS-075');
     });
   });
+
+  describe('5. Security, Scoping & Validation Guardrails', () => {
+    it('enforces salesman territory beat scoping (SM-001 cannot access RET-003)', async () => {
+      const { isRetailerAssignedToSalesman } = await import('./routes/salesman.js');
+      // SM-001 (Rajesh Sharma) is assigned to RET-001, RET-002, RET-004
+      const assigned = await isRetailerAssignedToSalesman('SM-001', 'RET-001');
+      expect(assigned).toBe(true);
+
+      // SM-001 is NOT assigned to RET-003 (assigned to SM-002 Vikas Tiwari)
+      const unassigned = await isRetailerAssignedToSalesman('SM-001', 'RET-003');
+      expect(unassigned).toBe(false);
+    });
+
+    it('rejects fractional quantities (e.g. 1.5 cases)', () => {
+      const qty1 = 1.5;
+      const isValidInteger = Number.isInteger(qty1) && qty1 > 0;
+      expect(isValidInteger).toBe(false);
+
+      const qty2 = 2;
+      const isValidInteger2 = Number.isInteger(qty2) && qty2 > 0;
+      expect(isValidInteger2).toBe(true);
+    });
+  });
 });

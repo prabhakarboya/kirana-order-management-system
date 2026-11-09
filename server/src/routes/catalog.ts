@@ -1,12 +1,29 @@
 import { Router, Response } from 'express';
 import { prisma } from '../db/prisma.js';
 import { AuthenticatedRequest, requireAuth } from '../middleware/auth.js';
+import { isRetailerAssignedToSalesman } from './salesman.js';
 
 const router = Router();
 
 router.get('/', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   const user = req.user!;
-  const retailerId = user.retailer?.id;
+  let targetRetailerId = user.retailer?.id;
+
+  if (user.role === 'SALESMAN') {
+    const requestedRetailerId = req.query.retailerId as string | undefined;
+    if (requestedRetailerId) {
+      const isAssigned = await isRetailerAssignedToSalesman(user.salesman?.id, requestedRetailerId);
+      if (!isAssigned) {
+        return res.status(403).json({ error: 'Access denied: Retailer is not assigned to your route/beat.' });
+      }
+      targetRetailerId = requestedRetailerId;
+    }
+  } else if (user.role === 'DESK') {
+    const requestedRetailerId = req.query.retailerId as string | undefined;
+    if (requestedRetailerId) {
+      targetRetailerId = requestedRetailerId;
+    }
+  }
 
   // 1. Fetch SKUs and their active trade schemes
   const skus = await prisma.sku.findMany({
@@ -20,9 +37,9 @@ router.get('/', requireAuth, async (req: AuthenticatedRequest, res: Response) =>
 
   // 2. Fetch retailer-specific custom negotiated prices
   let customPrices: Record<string, { dealerPrice: number; casePrice: number }> = {};
-  if (retailerId) {
+  if (targetRetailerId) {
     const prices = await prisma.retailerPrice.findMany({
-      where: { retailerId },
+      where: { retailerId: targetRetailerId },
     });
     for (const p of prices) {
       customPrices[p.skuCode] = { dealerPrice: p.dealerPrice, casePrice: p.casePrice };
@@ -76,11 +93,11 @@ router.get('/', requireAuth, async (req: AuthenticatedRequest, res: Response) =>
     };
   });
 
-  // 4. Return retailer credit information (visible only to that retailer)
+  // 4. Return retailer credit information (visible only to that retailer, their salesman, or desk)
   let retailerInfo = null;
-  if (user.retailer) {
+  if (targetRetailerId) {
     const dbRetailer = await prisma.retailer.findUnique({
-      where: { id: user.retailer.id },
+      where: { id: targetRetailerId },
     });
     if (dbRetailer) {
       retailerInfo = {

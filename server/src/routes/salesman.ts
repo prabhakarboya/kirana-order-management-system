@@ -4,6 +4,16 @@ import { AuthenticatedRequest, requireAuth } from '../middleware/auth.js';
 
 const router = Router();
 
+// Helper: Check if a retailer is assigned to a salesman
+export async function isRetailerAssignedToSalesman(salesmanId: string | undefined, retailerId: string): Promise<boolean> {
+  if (!salesmanId || !retailerId) return false;
+  const rows = await (prisma as any).rawQuery(
+    `SELECT 1 FROM retailer_salesman_assignments WHERE salesmanId = ? AND retailerId = ? LIMIT 1`,
+    [salesmanId, retailerId]
+  );
+  return Array.isArray(rows) && rows.length > 0;
+}
+
 // Middleware: Verify user is a Salesman or Order Desk
 function requireSalesmanOrDesk(req: AuthenticatedRequest, res: Response, next: () => void) {
   if (!req.user) {
@@ -15,28 +25,30 @@ function requireSalesmanOrDesk(req: AuthenticatedRequest, res: Response, next: (
   next();
 }
 
-// 1. Get assigned kirana retailers for the logged-in salesman
+// 1. Get assigned kirana retailers for the logged-in salesman (strictly scoped)
 router.get('/my-retailers', requireAuth, requireSalesmanOrDesk, async (req: AuthenticatedRequest, res: Response) => {
   const user = req.user!;
   const salesmanId = user.salesman?.id;
 
   try {
     let retailers: any[] = [];
-    if (salesmanId) {
-      const rows = await (prisma as any).rawQuery(
-        `SELECT r.*, rsa.isPrimary 
-         FROM retailers r
-         JOIN retailer_salesman_assignments rsa ON r.id = rsa.retailerId
-         WHERE rsa.salesmanId = ?
-         ORDER BY r.shopName ASC`,
-        [salesmanId]
-      );
-      retailers = rows;
-    }
-
-    // Fallback: If no direct assignments or testing as desk, return all active retailers
-    if (!retailers.length) {
-      retailers = await prisma.retailer.findMany();
+    if (user.role === 'SALESMAN') {
+      if (salesmanId) {
+        const rows = await (prisma as any).rawQuery(
+          `SELECT r.*, rsa.isPrimary 
+           FROM retailers r
+           JOIN retailer_salesman_assignments rsa ON r.id = rsa.retailerId
+           WHERE rsa.salesmanId = ?
+           ORDER BY r.shopName ASC`,
+          [salesmanId]
+        );
+        retailers = Array.isArray(rows) ? rows : [];
+      } else {
+        retailers = [];
+      }
+    } else {
+      // Order Desk can view all retailers across Jabalpur
+      retailers = await prisma.retailer.findMany({ orderBy: { shopName: 'asc' } });
     }
 
     return res.json({
@@ -58,9 +70,17 @@ router.get('/my-retailers', requireAuth, requireSalesmanOrDesk, async (req: Auth
   }
 });
 
-// 2. Get specific retailer detail for shop visit
+// 2. Get specific retailer detail for shop visit (strictly scoped to assigned salesman or desk)
 router.get('/retailer/:id', requireAuth, requireSalesmanOrDesk, async (req: AuthenticatedRequest, res: Response) => {
   const { id } = req.params;
+  const user = req.user!;
+
+  if (user.role === 'SALESMAN') {
+    const isAssigned = await isRetailerAssignedToSalesman(user.salesman?.id, id);
+    if (!isAssigned) {
+      return res.status(403).json({ error: 'Access denied: Retailer is not assigned to your route/beat.' });
+    }
+  }
 
   try {
     const retailer = await prisma.retailer.findUnique({ where: { id } });

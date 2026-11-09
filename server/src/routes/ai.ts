@@ -9,6 +9,7 @@ import {
   RetailerPastOrderSummary,
 } from '../ai/parser.js';
 import { SkuItem } from '../types.js';
+import { isRetailerAssignedToSalesman } from './salesman.js';
 
 const router = Router();
 const upload = multer({
@@ -87,7 +88,19 @@ router.post('/parse-order', requireAuth, async (req: AuthenticatedRequest, res: 
   }
 
   const user = req.user!;
-  const retailerId = user.retailer?.id || overrideRetailerId || null;
+  let retailerId = user.retailer?.id || null;
+
+  if (overrideRetailerId) {
+    if (user.role === 'SALESMAN') {
+      const isAssigned = await isRetailerAssignedToSalesman(user.salesman?.id, overrideRetailerId);
+      if (!isAssigned) {
+        return res.status(403).json({ error: 'Access denied: Retailer is not assigned to your route/beat.' });
+      }
+      retailerId = overrideRetailerId;
+    } else if (user.role === 'DESK') {
+      retailerId = overrideRetailerId;
+    }
+  }
 
   try {
     const { catalog, aliases, pastOrders } = await getCatalogAndAliases(retailerId);
@@ -101,10 +114,23 @@ router.post('/parse-order', requireAuth, async (req: AuthenticatedRequest, res: 
   }
 });
 
-// 2. Multimodal Photo OCR (Handwritten paper slips via Gemini Vision)
+// 2. Multimodal Photo OCR (Handwritten paper slips via Gemini Vision or Offline Demo Fallback)
 router.post('/parse-photo', requireAuth, upload.single('photo'), async (req: AuthenticatedRequest, res: Response) => {
   const user = req.user!;
-  const retailerId = user.retailer?.id || null;
+  let retailerId = user.retailer?.id || null;
+  const overrideRetailerId = req.body.retailerId;
+
+  if (overrideRetailerId) {
+    if (user.role === 'SALESMAN') {
+      const isAssigned = await isRetailerAssignedToSalesman(user.salesman?.id, overrideRetailerId);
+      if (!isAssigned) {
+        return res.status(403).json({ error: 'Access denied: Retailer is not assigned to your route/beat.' });
+      }
+      retailerId = overrideRetailerId;
+    } else if (user.role === 'DESK') {
+      retailerId = overrideRetailerId;
+    }
+  }
 
   if (!req.file) {
     return res.status(400).json({
@@ -129,10 +155,23 @@ router.post('/parse-photo', requireAuth, upload.single('photo'), async (req: Aut
   }
 });
 
-// 3. Audio Voice Note Transcription & Parsing (Hindi voice notes via Gemini Audio)
+// 3. Audio Voice Note Transcription & Parsing (Hindi voice notes via Gemini Audio or Offline Demo Fallback)
 router.post('/parse-audio', requireAuth, upload.single('audio'), async (req: AuthenticatedRequest, res: Response) => {
   const user = req.user!;
-  const retailerId = user.retailer?.id || null;
+  let retailerId = user.retailer?.id || null;
+  const overrideRetailerId = req.body.retailerId;
+
+  if (overrideRetailerId) {
+    if (user.role === 'SALESMAN') {
+      const isAssigned = await isRetailerAssignedToSalesman(user.salesman?.id, overrideRetailerId);
+      if (!isAssigned) {
+        return res.status(403).json({ error: 'Access denied: Retailer is not assigned to your route/beat.' });
+      }
+      retailerId = overrideRetailerId;
+    } else if (user.role === 'DESK') {
+      retailerId = overrideRetailerId;
+    }
+  }
 
   if (!req.file) {
     return res.status(400).json({

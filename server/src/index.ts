@@ -3,6 +3,7 @@ import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import dotenv from 'dotenv';
 import path from 'path';
+import zlib from 'zlib';
 
 import { prisma } from './db/prisma.js';
 import { seedDatabase } from './seed.js';
@@ -19,6 +20,52 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 5000;
 const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
+
+// 1. Remove identifying server header
+app.disable('x-powered-by');
+
+// 2. Security Headers Middleware
+app.use((_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  next();
+});
+
+// 3. Native Gzip Compression Middleware (zero external dependency)
+app.use((req, res, next) => {
+  const acceptEncoding = (req.headers['accept-encoding'] as string) || '';
+  if (!acceptEncoding.includes('gzip')) {
+    return next();
+  }
+
+  const originalSend = res.send.bind(res);
+  res.send = function (body: any): any {
+    if (res.headersSent || body === undefined || body === null) {
+      return originalSend(body);
+    }
+    try {
+      const buffer = Buffer.isBuffer(body)
+        ? body
+        : typeof body === 'string'
+        ? Buffer.from(body)
+        : Buffer.from(JSON.stringify(body));
+
+      if (buffer.length >= 1024) {
+        const compressed = zlib.gzipSync(buffer);
+        res.setHeader('Content-Encoding', 'gzip');
+        res.setHeader('Vary', 'Accept-Encoding');
+        res.removeHeader('Content-Length');
+        return originalSend(compressed);
+      }
+    } catch {
+      // Fallback to uncompressed on any compression error
+    }
+    return originalSend(body);
+  };
+  next();
+});
 
 app.use(
   cors({

@@ -3,6 +3,7 @@ import { prisma } from '../db/prisma.js';
 import { AuthenticatedRequest, requireAuth } from '../middleware/auth.js';
 import { calculateLineScheme, calculateOrderSummary } from '../schemeEngine/index.js';
 import { SkuItem } from '../types.js';
+import { isRetailerAssignedToSalesman } from './salesman.js';
 
 const router = Router();
 
@@ -40,31 +41,47 @@ function mapPrismaSkuToItem(sku: any, customCasePrice?: number): SkuItem {
 
 // Calculate cart schemes live
 router.post('/calculate', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
-  const { items } = req.body as { items: Array<{ skuCode: string; qtyCases: number }> };
+  const { items, retailerId: requestedRetailerId } = req.body as {
+    items: Array<{ skuCode: string; qtyCases: number }>;
+    retailerId?: string;
+  };
 
   if (!items || !Array.isArray(items)) {
     return res.status(400).json({ error: 'Items array is required.' });
   }
 
   const user = req.user!;
+  let targetRetailerId = user.retailer?.id;
+
+  if (user.role === 'SALESMAN' && requestedRetailerId) {
+    const isAssigned = await isRetailerAssignedToSalesman(user.salesman?.id, requestedRetailerId);
+    if (!isAssigned) {
+      return res.status(403).json({ error: 'Access denied: Retailer is not assigned to your route/beat.' });
+    }
+    targetRetailerId = requestedRetailerId;
+  }
+
   let creditLimit = 50000;
   let creditUsed = 0;
 
-  if (user.retailer) {
-    const dbRet = await prisma.retailer.findUnique({ where: { id: user.retailer.id } });
+  if (targetRetailerId) {
+    const dbRet = await prisma.retailer.findUnique({ where: { id: targetRetailerId } });
     if (dbRet) {
       creditLimit = dbRet.creditLimit;
       creditUsed = dbRet.creditUsed;
     }
   }
 
-  // Aggregate duplicate SKUs
+  // Aggregate duplicate SKUs and reject non-integer / fractional quantities
   const aggregatedMap = new Map<string, number>();
   for (const item of items) {
-    const qty = Math.max(0, parseInt(String(item.qtyCases), 10) || 0);
-    if (qty > 0) {
-      aggregatedMap.set(item.skuCode, (aggregatedMap.get(item.skuCode) || 0) + qty);
+    const num = Number(item.qtyCases);
+    if (!Number.isInteger(num) || num <= 0) {
+      return res.status(400).json({
+        error: `Quantity for SKU ${item.skuCode} must be a whole positive number of cases. Fractional cases (${item.qtyCases}) are not accepted in FMCG wholesale.`,
+      });
     }
+    aggregatedMap.set(item.skuCode, (aggregatedMap.get(item.skuCode) || 0) + num);
   }
 
   try {
@@ -75,8 +92,8 @@ router.post('/calculate', requireAuth, async (req: AuthenticatedRequest, res: Re
     });
 
     // Check custom prices
-    const customPrices = user.retailer
-      ? await prisma.retailerPrice.findMany({ where: { retailerId: user.retailer.id } })
+    const customPrices = targetRetailerId
+      ? await prisma.retailerPrice.findMany({ where: { retailerId: targetRetailerId } })
       : [];
     const customPriceMap = new Map(customPrices.map((cp) => [cp.skuCode, cp.casePrice]));
 
@@ -112,6 +129,10 @@ router.post('/create', requireAuth, async (req: AuthenticatedRequest, res: Respo
     if (!requestedRetailerId) {
       return res.status(400).json({ error: 'Salesman must specify a target retailerId.' });
     }
+    const isAssigned = await isRetailerAssignedToSalesman(user.salesman?.id, requestedRetailerId);
+    if (!isAssigned) {
+      return res.status(403).json({ error: 'Access denied: Retailer is not assigned to your route/beat.' });
+    }
     targetRetailerId = requestedRetailerId;
   } else if (!targetRetailerId) {
     return res.status(400).json({ error: 'No linked retailer profile found for current user.' });
@@ -133,14 +154,16 @@ router.post('/create', requireAuth, async (req: AuthenticatedRequest, res: Respo
     }
   }
 
-  // Aggregate duplicate SKUs to avoid inventory overselling
+  // Aggregate duplicate SKUs to avoid inventory overselling and reject fractional quantities
   const aggregatedMap = new Map<string, number>();
   for (const item of items) {
-    const qty = parseInt(String(item.qtyCases), 10) || 0;
-    if (qty <= 0) {
-      return res.status(400).json({ error: `Quantity for SKU ${item.skuCode} must be greater than 0.` });
+    const num = Number(item.qtyCases);
+    if (!Number.isInteger(num) || num <= 0) {
+      return res.status(400).json({
+        error: `Quantity for SKU ${item.skuCode} must be a whole positive number of cases. Fractional cases (${item.qtyCases}) are not accepted in FMCG wholesale.`,
+      });
     }
-    aggregatedMap.set(item.skuCode, (aggregatedMap.get(item.skuCode) || 0) + qty);
+    aggregatedMap.set(item.skuCode, (aggregatedMap.get(item.skuCode) || 0) + num);
   }
 
   const dbRetailer = await prisma.retailer.findUnique({

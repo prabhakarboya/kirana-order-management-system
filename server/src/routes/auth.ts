@@ -17,7 +17,7 @@ const otpRateLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-// Send OTP
+// Send OTP (Uniform response prevents customer enumeration)
 router.post('/send-otp', otpRateLimiter, async (req: Request, res: Response) => {
   const { phone } = req.body;
   if (!phone || typeof phone !== 'string' || phone.length < 10) {
@@ -34,26 +34,22 @@ router.post('/send-otp', otpRateLimiter, async (req: Request, res: Response) => 
 
   const user = await prisma.user.findUnique({ where: { phone } });
 
-  if (!user) {
-    return res.status(404).json({
-      error: `Mobile number +91 ${phone} is not registered in Company A distributor records. Please contact the order desk at Jabalpur HQ to register your kirana shop.`,
+  // Update OTP only if user is registered, but always return uniform response to prevent enumeration
+  if (user) {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        otpCode: generatedCode,
+        otpExpiresAt: expiresAt,
+        otpAttempts: 0,
+      },
     });
   }
 
-  // Update existing user OTP
-  await prisma.user.update({
-    where: { id: user.id },
-    data: {
-      otpCode: generatedCode,
-      otpExpiresAt: expiresAt,
-      otpAttempts: 0,
-    },
-  });
-
   return res.json({
     success: true,
-    message: `OTP sent successfully to +91 ${phone}. Valid for 5 minutes.`,
-    demoCode: process.env.NODE_ENV === 'production' ? undefined : generatedCode,
+    message: `If mobile number +91 ${phone} is registered with Company A, an OTP has been sent. Valid for 5 minutes.`,
+    demoCode: (process.env.NODE_ENV !== 'production' && user) ? generatedCode : undefined,
   });
 });
 
@@ -67,11 +63,12 @@ router.post('/verify-otp', async (req: Request, res: Response) => {
 
   const user = await prisma.user.findUnique({
     where: { phone },
-    include: { retailer: true },
+    include: { retailer: true, salesman: true },
   });
 
+  // Generic message prevents phone enumeration
   if (!user) {
-    return res.status(404).json({ error: 'Account not found for this mobile number.' });
+    return res.status(400).json({ error: 'Invalid or expired OTP.' });
   }
 
   // Check failed attempts
@@ -124,13 +121,21 @@ router.post('/verify-otp', async (req: Request, res: Response) => {
       name: user.name,
       role: user.role,
       retailer: user.retailer,
+      salesman: user.salesman,
     },
   });
 });
 
-// Instant Evaluation Role Switcher (Retailer, Salesman, Desk)
+// Instant Evaluation Role Switcher (Strictly disabled in production)
 router.post('/demo-switch', async (req: Request, res: Response) => {
+  if (process.env.NODE_ENV === 'production') {
+    return res.status(404).json({ error: 'Endpoint disabled in production environment.' });
+  }
+
   const { role } = req.body; // 'RETAILER' | 'SALESMAN' | 'DESK'
+  if (!['RETAILER', 'SALESMAN', 'DESK'].includes(role)) {
+    return res.status(400).json({ error: 'Invalid demo role. Allowed: RETAILER, SALESMAN, DESK.' });
+  }
 
   let targetUser;
   if (role === 'DESK') {

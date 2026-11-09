@@ -1,10 +1,10 @@
 # Technical Design Document (TDD)
 ## FMCG Distributor's Retailer Ordering App with Pure Native MySQL 8 & AI Order Capture
 
-**Public Repository:** `https://github.com/company-a-distributors/kirana-order`  
+**Submission:** Kirana Order Management System  
 **Client:** Company A, Jabalpur, Madhya Pradesh  
 **Annual Turnover:** ₹85–100 Crore | **Kirana Network:** 1,800 retail stores | **Sales Team:** 18 salesmen  
-**Target Solution:** Production-ready Mobile-First PWA, Gemini Multimodal Order Capture, Deterministic Trade Scheme Engine, Pure Native MySQL 8 Relational Persistence, Credit Hold Authorization, Salesman Beat Offline Visits (IndexedDB), and Tally ERP 9 / TallyPrime Exporter.
+**Target Solution:** Production-ready Mobile-First PWA, Multimodal Gemini & Offline Fallback Order Capture, Deterministic Trade Scheme Engine, Pure Native MySQL 8 Relational Persistence, Credit Hold Authorization, Salesman Beat Offline Visits (IndexedDB), Scoped Security Access, and Tally ERP 9 / TallyPrime Exporter.
 
 ---
 
@@ -178,7 +178,7 @@ The AI engine uses Google Gemini 2.5 Flash to parse informal Hinglish/Hindi orde
 ## 7. Credit Hold Enforcement & Inventory Safeguards
 
 ### Concurrency-Safe ACID Transactions
-- Order creation executes inside `prisma.$transaction` (our native MySQL 2 transaction connection adapter) with row-level locking (`SELECT stock_cases FROM skus WHERE code = ? FOR UPDATE`).
+- Order creation executes inside an ACID MySQL 8 transaction (`conn.beginTransaction()`) using row-level locking (`SELECT stock_cases FROM skus WHERE code = ? FOR UPDATE`).
 - Re-verifies inventory sufficiency and customer credit limits atomically under high concurrency.
 - Order numbers use high-entropy unique sequences (`ORD-2026-XXXX-RAND`) to eliminate serial collisions.
 
