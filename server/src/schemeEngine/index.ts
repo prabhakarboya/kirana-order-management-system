@@ -104,6 +104,7 @@ export function calculateLineScheme(params: CalculateLineItemParams): SchemeCalc
 
   return {
     skuCode: sku.code,
+    skuName: sku.name,
     qtyCases,
     unitCasePrice,
     grossAmount,

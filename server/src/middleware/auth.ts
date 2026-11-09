@@ -39,7 +39,7 @@ export async function requireAuth(req: AuthenticatedRequest, res: Response, next
 
     const dbUser = await prisma.user.findUnique({
       where: { id: decoded.userId },
-      include: { retailer: true },
+      include: { retailer: true, salesman: true },
     });
 
     if (!dbUser) {
@@ -57,6 +57,14 @@ export async function requireAuth(req: AuthenticatedRequest, res: Response, next
             shopName: dbUser.retailer.shopName,
             creditLimit: dbUser.retailer.creditLimit,
             creditUsed: dbUser.retailer.creditUsed,
+          }
+        : null,
+      salesman: dbUser.salesman
+        ? {
+            id: dbUser.salesman.id,
+            name: dbUser.salesman.name,
+            phone: dbUser.salesman.phone,
+            territory: dbUser.salesman.territory,
           }
         : null,
     };

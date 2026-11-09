@@ -1,9 +1,9 @@
 import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
+import compression from 'compression';
 import dotenv from 'dotenv';
 import path from 'path';
-import zlib from 'zlib';
 
 import { prisma } from './db/prisma.js';
 import { seedDatabase } from './seed.js';
@@ -33,39 +33,8 @@ app.use((_req, res, next) => {
   next();
 });
 
-// 3. Native Gzip Compression Middleware (zero external dependency)
-app.use((req, res, next) => {
-  const acceptEncoding = (req.headers['accept-encoding'] as string) || '';
-  if (!acceptEncoding.includes('gzip')) {
-    return next();
-  }
-
-  const originalSend = res.send.bind(res);
-  res.send = function (body: any): any {
-    if (res.headersSent || body === undefined || body === null) {
-      return originalSend(body);
-    }
-    try {
-      const buffer = Buffer.isBuffer(body)
-        ? body
-        : typeof body === 'string'
-        ? Buffer.from(body)
-        : Buffer.from(JSON.stringify(body));
-
-      if (buffer.length >= 1024) {
-        const compressed = zlib.gzipSync(buffer);
-        res.setHeader('Content-Encoding', 'gzip');
-        res.setHeader('Vary', 'Accept-Encoding');
-        res.removeHeader('Content-Length');
-        return originalSend(compressed);
-      }
-    } catch {
-      // Fallback to uncompressed on any compression error
-    }
-    return originalSend(body);
-  };
-  next();
-});
+// 3. Official Gzip Compression Middleware
+app.use(compression());
 
 app.use(
   cors({

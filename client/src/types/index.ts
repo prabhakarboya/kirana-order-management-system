@@ -64,6 +64,7 @@ export interface UserSession {
 
 export interface SchemeCalculationResult {
   skuCode: string;
+  skuName?: string;
   qtyCases: number;
   unitCasePrice: number;
   grossAmount: number;

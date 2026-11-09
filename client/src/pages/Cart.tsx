@@ -199,11 +199,13 @@ export const Cart: React.FC = () => {
                   <div>
                     <span className="text-[10px] font-mono text-slate-400">{line.skuCode}</span>
                     <h3 className="font-bold text-slate-900 text-sm sm:text-base">
-                      {line.skuCode === 'SKU-BS-075'
+                      {line.skuName || (line.skuCode === 'SKU-BS-075'
                         ? 'Glucose biscuit 75 g, case of 96'
                         : line.skuCode === 'SKU-DT-1KG'
                         ? 'Detergent powder 1 kg, case of 20'
-                        : 'Tea leaf 250 g, case of 40'}
+                        : line.skuCode === 'SKU-TE-250'
+                        ? 'Tea leaf 250 g, case of 40'
+                        : line.skuCode)}
                     </h3>
                     <div className="text-xs text-slate-500 mt-0.5">
                       Rate: ₹{line.unitCasePrice.toFixed(2)} / case ({t('gstExcluded')})
