@@ -1,6 +1,7 @@
 # FMCG Kirana Retailer Ordering App with Pure Native MySQL 8 & AI Order Capture
 
 **Client:** Company A, Jabalpur, Madhya Pradesh  
+**GitHub Repository:** `https://github.com/prabhakarboya/kirana-order-management-system`  
 **Annual Revenue:** ₹85–100 Crore | **Retail Network:** 1,800 Kirana Stores | **Sales Team:** 18 Salesmen  
 **Financial Impact Solved:** **₹52.5 Lakh / Year** (₹31.5L wrong items/redelivery + ₹15.6L order-entry staff + ₹5.4L stock-out margin loss)  
 **Database Architecture:** **100% Pure Native MySQL 8 (mysql2/promise)** — Zero Prisma, Zero SQLite.
@@ -25,7 +26,7 @@ A production-ready ordering platform built for FMCG distributors and kirana merc
    - Slab percentage discounts: *"3% off on 5 or more cases"*.
    - GST computed strictly on post-discount net taxable base.
    - Paisa precision rounding with zero floating point drift.
-   - Comprehensive Vitest automated test suite (**25/25 tests passing**).
+   - Comprehensive Vitest automated test suite (**28/28 tests passing**).
 
 3. **Multimodal AI Order Capture:**
    - Transcribes unstructured Hindi/Hinglish text (e.g. *"bhaiya 5 peti biscuit chhota, 2 peti washing powder 1 kilo, chai patti 250 wala 1 peti"*).

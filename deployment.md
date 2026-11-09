@@ -1,4 +1,5 @@
 # FMCG Kirana Retailer Ordering App - Deployment & Environment Guide
+**GitHub Repository:** `https://github.com/prabhakarboya/kirana-order-management-system`  
 **Client:** Company A, Jabalpur  
 **Solution:** FMCG Distributor Retailer Ordering App with Pure Native MySQL 8 & Multimodal AI Order Capture  
 **Database:** Pure Native MySQL 8.0+ (No Prisma, No SQLite)  
@@ -30,10 +31,8 @@ Get-Content server/src/db/schema.sql -Raw | mysql -u root -p kirana_order
 # On Linux / macOS:
 mysql -u root -p kirana_order < server/src/db/schema.sql
 
-# 3. Run automated verification test suite (26/26 Tests Passing)
-cd server
-npm test
-cd ..
+# 3. Run automated verification test suite (28/28 Tests Passing)
+npm test --workspace=server
 
 # 4. Start development servers (Frontend on port 5173, Backend API on port 5000)
 npm run dev

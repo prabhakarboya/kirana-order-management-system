@@ -6,7 +6,30 @@ project_root = r"C:\Users\boyap\.gemini\antigravity\scratch\kirana-order"
 downloads_dir = r"C:\Users\boyap\Downloads"
 artifact_dir = r"C:\Users\boyap\.gemini\antigravity\brain\238415da-5fb0-4d3d-b270-459e06750f44"
 
-# 1. Package kirana-docs-submission.zip
+# 1. Package the exact official submission ZIP: kirana-submission.zip
+# Containing EXACTLY the 2 required files: Technical Design Document (Word) and deployment.md
+official_submission_files = [
+    "TECHNICAL_DESIGN_DOCUMENT.docx",
+    "deployment.md"
+]
+
+official_zip_downloads = os.path.join(downloads_dir, "kirana-submission.zip")
+official_zip_artifact = os.path.join(artifact_dir, "kirana-submission.zip")
+
+print("Building official 2-file kirana-submission.zip (TDD + deployment.md)...")
+with zipfile.ZipFile(official_zip_downloads, "w", zipfile.ZIP_DEFLATED) as zf:
+    for f in official_submission_files:
+        src = os.path.join(project_root, f)
+        if os.path.exists(src):
+            zf.write(src, arcname=f)
+            print(f"Added {f}")
+        else:
+            print(f"Error: {f} not found!")
+
+shutil.copy2(official_zip_downloads, official_zip_artifact)
+print(f"Saved {official_zip_downloads} and copied to {official_zip_artifact}")
+
+# Also keep kirana-docs-submission.zip with all supplementary docs
 docs_files = [
     "TECHNICAL_DESIGN_DOCUMENT.docx",
     "TECHNICAL_DESIGN_DOCUMENT.md",
@@ -15,25 +38,17 @@ docs_files = [
     "PRODUCTION_READINESS.md",
     "README.md"
 ]
-
 docs_zip_downloads = os.path.join(downloads_dir, "kirana-docs-submission.zip")
 docs_zip_artifact = os.path.join(artifact_dir, "kirana-docs-submission.zip")
-
-print("Building kirana-docs-submission.zip...")
 with zipfile.ZipFile(docs_zip_downloads, "w", zipfile.ZIP_DEFLATED) as zf:
     for f in docs_files:
         src = os.path.join(project_root, f)
         if os.path.exists(src):
             zf.write(src, arcname=f)
-            print(f"Added {f}")
-        else:
-            print(f"Warning: {f} not found!")
 
 shutil.copy2(docs_zip_downloads, docs_zip_artifact)
-print(f"Saved {docs_zip_downloads} and copied to {docs_zip_artifact}")
 
-# 2. Package kirana-order-submission.zip
-# Standard root package shape with strict exclusion of .env secrets, node_modules, and git directories
+# 2. Package kirana-order-submission.zip (complete source code without secrets, node_modules, git)
 code_zip_downloads = os.path.join(downloads_dir, "kirana-order-submission.zip")
 code_zip_artifact = os.path.join(artifact_dir, "kirana-order-submission.zip")
 
@@ -46,7 +61,6 @@ with zipfile.ZipFile(code_zip_downloads, "w", zipfile.ZIP_DEFLATED) as zf:
     for root, dirs, files in os.walk(project_root):
         dirs[:] = [d for d in dirs if d not in excluded_dirs]
         for file in files:
-            # Strictly exclude sensitive .env files, keeping only .env.example
             if file == ".env" or (file.startswith(".env.") and not file.endswith(".example")):
                 continue
             ext = os.path.splitext(file)[1].lower()
@@ -54,7 +68,6 @@ with zipfile.ZipFile(code_zip_downloads, "w", zipfile.ZIP_DEFLATED) as zf:
                 continue
             abs_path = os.path.join(root, file)
             rel_path = os.path.relpath(abs_path, project_root)
-            # Store directly from repository root
             zf.write(abs_path, arcname=rel_path)
             count += 1
 

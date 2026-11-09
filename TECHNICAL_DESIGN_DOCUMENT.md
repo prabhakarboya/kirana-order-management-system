@@ -1,7 +1,7 @@
 # Technical Design Document (TDD)
 ## FMCG Distributor's Retailer Ordering App with Pure Native MySQL 8 & AI Order Capture
 
-**Submission:** Kirana Order Management System  
+**GitHub Repository:** `https://github.com/prabhakarboya/kirana-order-management-system`  
 **Client:** Company A, Jabalpur, Madhya Pradesh  
 **Annual Turnover:** ₹85–100 Crore | **Kirana Network:** 1,800 retail stores | **Sales Team:** 18 salesmen  
 **Target Solution:** Production-ready Mobile-First PWA, Multimodal Gemini & Offline Fallback Order Capture, Deterministic Trade Scheme Engine, Pure Native MySQL 8 Relational Persistence, Credit Hold Authorization, Salesman Beat Offline Visits (IndexedDB), Scoped Security Access, and Tally ERP 9 / TallyPrime Exporter.
